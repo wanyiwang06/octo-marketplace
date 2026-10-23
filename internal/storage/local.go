@@ -101,6 +101,9 @@ func pathWithin(base, target string) bool {
 // PresignPut returns a URL to which the client can PUT a file.
 // For local storage, this is a backend proxy endpoint.
 func (s *LocalStorage) PresignPut(_ context.Context, key string, contentType string, _ time.Duration) (string, http.Header, error) {
+	if IsImmutableArtifactKey(key) {
+		return "", nil, ErrImmutableObject
+	}
 	full, err := s.safePath(key)
 	if err != nil {
 		return "", nil, err
@@ -177,6 +180,9 @@ func (s *LocalStorage) PutObject(_ context.Context, key string, reader io.Reader
 
 // DeleteObject removes the file from disk.
 func (s *LocalStorage) DeleteObject(_ context.Context, key string) error {
+	if IsImmutableArtifactKey(key) {
+		return ErrImmutableObject
+	}
 	full, err := s.safePath(key)
 	if err != nil {
 		return err
@@ -190,6 +196,9 @@ func (s *LocalStorage) DeleteObject(_ context.Context, key string) error {
 
 // WriteObject writes data to the local filesystem (used by the local upload proxy).
 func (s *LocalStorage) WriteObject(key string, r io.Reader) (retErr error) {
+	if IsImmutableArtifactKey(key) {
+		return ErrImmutableObject
+	}
 	full, err := s.safePath(key)
 	if err != nil {
 		return err
@@ -228,6 +237,9 @@ func (s *LocalStorage) WriteObject(key string, r io.Reader) (retErr error) {
 
 // CopyObject copies a file from srcKey to dstKey within the local filesystem.
 func (s *LocalStorage) CopyObject(_ context.Context, srcKey, dstKey string) error {
+	if IsImmutableArtifactKey(dstKey) {
+		return ErrImmutableObject
+	}
 	srcFull, err := s.safePath(srcKey)
 	if err != nil {
 		return err

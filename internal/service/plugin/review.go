@@ -456,6 +456,9 @@ func (s *Service) freezeSubmission(ctx context.Context, caller Caller, detail *D
 		if !sameAttachmentSidecar(docs.AttachmentKeys, plugin.AttachmentKeys) {
 			return pluginrepo.FrozenSnapshot{}, &ReviewFieldError{Field: "plugin_json", Reason: "storage_attachment_change_requires_zip_upload"}
 		}
+		if err := s.freezeVersionArtifacts(ctx, plugin.Type, docs, caller.SpaceID); err != nil {
+			return pluginrepo.FrozenSnapshot{}, err
+		}
 		snap.Manifest, snap.Package, snap.AttachmentKeys = docs.Manifest, docs.Package, docs.AttachmentKeys
 		snap.ManifestHash, snap.PluginHash = docs.ManifestHash, docs.PluginHash
 		// The submission carries its own content, so the repository's under-lock
@@ -536,6 +539,9 @@ func (s *Service) freezeSubmissionFromParseTask(ctx context.Context, caller Call
 		return pluginrepo.FrozenSnapshot{}, &ReviewFieldError{Field: "parse_task_id", Reason: "invalid_package", Err: err}
 	}
 
+	if err := s.freezeVersionArtifacts(ctx, plugin.Type, docs, caller.SpaceID); err != nil {
+		return pluginrepo.FrozenSnapshot{}, err
+	}
 	// Relations: if the submit body included relations, use them; otherwise
 	// inherit the live graph (same semantics as the declared-JSON path).
 	rels := detail.Relations
