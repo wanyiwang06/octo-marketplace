@@ -25,7 +25,7 @@ func TestPluginVersionFoundationMigrationAndReleaseOwnershipMySQL(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = migrate.Exec(db, "mysql", migrate.MemoryMigrationSource{Migrations: migrations[:len(migrations)-1]}, migrate.Up); err != nil {
+	if _, err = migrate.Exec(db, "mysql", migrate.MemoryMigrationSource{Migrations: migrations[:len(migrations)-migrationTailCount(t, source, "20261023-00-plugin-version-foundation.sql")]}, migrate.Up); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"first", "second"} {
@@ -58,7 +58,7 @@ func TestPluginVersionFoundationMigrationAndReleaseOwnershipMySQL(t *testing.T) 
 	if _, err = db.Exec(`UPDATE plugins SET published_version_id='old' WHERE plugin_id='first'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = migrate.ExecMax(db, "mysql", source, migrate.Down, 1); err != nil {
+	if _, err = migrate.ExecMax(db, "mysql", source, migrate.Down, migrationTailCount(t, source, "20261023-00-plugin-version-foundation.sql")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = migrate.Exec(db, "mysql", source, migrate.Up); err != nil {
