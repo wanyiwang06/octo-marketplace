@@ -473,6 +473,11 @@ func (s *Service) freezeSubmission(ctx context.Context, caller Caller, detail *D
 		}
 		snap.Relations = rels
 	}
+	docs := &CanonicalDocuments{Manifest: snap.Manifest, Package: snap.Package, PluginHash: snap.PluginHash, AttachmentKeys: snap.AttachmentKeys}
+	if err := s.freezeVersionArtifacts(ctx, plugin.Type, docs, caller.SpaceID); err != nil {
+		return pluginrepo.FrozenSnapshot{}, err
+	}
+	snap.Package, snap.PluginHash, snap.AttachmentKeys = docs.Package, docs.PluginHash, docs.AttachmentKeys
 	return snap, nil
 }
 

@@ -187,6 +187,9 @@ func (s *LocalStorage) DeleteObject(_ context.Context, key string) error {
 	if err != nil {
 		return err
 	}
+	if s.isImmutablePath(full) {
+		return ErrImmutableObject
+	}
 	err = os.Remove(full)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("local storage: remove: %w", err)
@@ -202,6 +205,9 @@ func (s *LocalStorage) WriteObject(key string, r io.Reader) (retErr error) {
 	full, err := s.safePath(key)
 	if err != nil {
 		return err
+	}
+	if s.isImmutablePath(full) {
+		return ErrImmutableObject
 	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return fmt.Errorf("local storage: mkdir: %w", err)
@@ -248,6 +254,9 @@ func (s *LocalStorage) CopyObject(_ context.Context, srcKey, dstKey string) erro
 	if err != nil {
 		return err
 	}
+	if s.isImmutablePath(dstFull) {
+		return ErrImmutableObject
+	}
 	src, err := os.OpenFile(srcFull, os.O_RDONLY|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return fmt.Errorf("local storage: copy open src: %w", err)
@@ -284,4 +293,21 @@ func (s *LocalStorage) CopyObject(_ context.Context, srcKey, dstKey string) erro
 	}
 	committed = true
 	return nil
+}
+
+// isImmutablePath prevents an in-root symlink alias from bypassing history guards.
+func (s *LocalStorage) isImmutablePath(full string) bool {
+	base, err := filepath.Abs(s.baseDir)
+	if err != nil {
+		return true
+	}
+	base, err = filepath.EvalSymlinks(base)
+	if err != nil {
+		return true
+	}
+	rel, err := filepath.Rel(base, full)
+	if err != nil {
+		return true
+	}
+	return IsImmutableArtifactKey(filepath.ToSlash(rel))
 }

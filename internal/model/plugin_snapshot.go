@@ -74,6 +74,9 @@ func DecodeSnapshotRelations(raw json.RawMessage) ([]PluginRelation, error) {
 	out := make([]PluginRelation, 0, len(rows))
 	aliases := map[string]string{"ID": "relation_id", "SourcePluginID": "source_plugin_id", "SourcePluginType": "source_plugin_type", "TargetPluginID": "target_plugin_id", "TargetPluginType": "target_plugin_type", "Type": "relation_type", "SortOrder": "sort_order", "Data": "data", "Status": "status", "CreatedBy": "created_by", "CreatedAt": "created_at", "UpdatedAt": "updated_at", "DeletedAt": "deleted_at"}
 	for _, row := range rows {
+		if row == nil {
+			return nil, errors.New("null snapshot relation")
+		}
 		for old, key := range aliases {
 			if v, ok := row[old]; ok {
 				if existing, ok := row[key]; ok && string(existing) != string(v) {

@@ -48,6 +48,26 @@ func snapshotArtifacts(p model.Plugin) (json.RawMessage, error) {
 			sum := sha256.Sum256([]byte(a.RawContent))
 			f.Size = int64(len(a.RawContent))
 			f.Digest = "sha256:" + hex.EncodeToString(sum[:])
+			if a.Path == "skill/ref.json" {
+				var ref map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(a.RawContent), &ref); err != nil {
+					return nil, err
+				}
+				for _, field := range []string{"object_key", "zip_object_key", "file_url"} {
+					var key, digest string
+					var size int64
+					_ = json.Unmarshal(ref[field], &key)
+					if key == "" {
+						continue
+					}
+					_ = json.Unmarshal(ref[field+"_size"], &size)
+					_ = json.Unmarshal(ref[field+"_hash"], &digest)
+					if size < 0 || len(digest) != 71 || !strings.HasPrefix(digest, "sha256:") {
+						return nil, errors.New("incomplete legacy artifact metadata")
+					}
+					out = append(out, model.PluginVersionArtifact{Path: a.Path + "/" + field, ContentType: "storage", ObjectKey: key, Size: size, Digest: digest})
+				}
+			}
 		case "storage":
 			f.ObjectKey = keys[a.Path]
 			if f.ObjectKey == "" || f.Size < 0 || len(f.Digest) != 71 || !strings.HasPrefix(f.Digest, "sha256:") {

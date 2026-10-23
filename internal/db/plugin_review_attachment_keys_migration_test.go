@@ -62,10 +62,11 @@ func TestPluginReviewAttachmentKeysMigrationUpDownMySQL(t *testing.T) {
 	// applied migration. Four listing_state files and the newer review-policy
 	// migration follow 20260901-01, and the plugin-rating and plugin-scene
 	// migrations add two more, so reaching it takes 8 steps.
-	if n, err := migrate.ExecMax(database, "mysql", source, migrate.Down, 8); err != nil {
+	steps := migrationTailCount(t, source, "20260901-01-plugin-review-attachment-keys.sql")
+	if n, err := migrate.ExecMax(database, "mysql", source, migrate.Down, steps); err != nil {
 		t.Fatalf("migrate Down: %v", err)
-	} else if n != 8 {
-		t.Fatalf("migrate Down applied %d migrations, want 8", n)
+	} else if n != steps {
+		t.Fatalf("migrate Down applied %d migrations, want %d", n, steps)
 	}
 
 	// The column must be gone.

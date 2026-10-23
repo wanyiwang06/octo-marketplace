@@ -139,10 +139,11 @@ func TestPluginReviewMigrationUpDownMySQL(t *testing.T) {
 	// + 2 review-feature files). The newer review-policy migration adds one more
 	// tail step, while the newer plugin-rating and plugin-scene migrations add two
 	// more, so reaching 20260901-00 now takes 9.
-	if n, err := migrate.ExecMax(database, "mysql", source, migrate.Down, 9); err != nil {
+	steps := migrationTailCount(t, source, "20260901-00-plugin-review-requests.sql")
+	if n, err := migrate.ExecMax(database, "mysql", source, migrate.Down, steps); err != nil {
 		t.Fatalf("migrate Down: %v", err)
-	} else if n != 9 {
-		t.Fatalf("migrate Down applied %d migrations, want 9", n)
+	} else if n != steps {
+		t.Fatalf("migrate Down applied %d migrations, want %d", n, steps)
 	}
 	for _, table := range pluginReviewTables {
 		var count int

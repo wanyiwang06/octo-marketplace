@@ -925,7 +925,7 @@ func (s *Service) buildWrite(ctx context.Context, c Caller, pluginID string, req
 	if err := s.freezeVersionArtifacts(ctx, req.Type, docs, c.SpaceID); err != nil {
 		return nil, nil, err
 	}
-	p.AttachmentKeys = docs.AttachmentKeys
+	p.Package, p.PluginHash, p.AttachmentKeys = docs.Package, docs.PluginHash, docs.AttachmentKeys
 	rels, err := s.buildRelations(ctx, c, admin, p, req.Relations, now)
 	if err != nil {
 		return nil, nil, err
