@@ -1,6 +1,6 @@
 # 开发规格与依赖关系（P 模型）
 
-> **2026-10-26 权威修订：P 模型（上架冻结依赖）取代 B 模型。** 权威文档：[decisions-20261026-pin.md](../decisions-20261026-pin.md)。Expert→Skill、Team→Expert 在源资源发布/提交时冻结 `target_version_id`，读取/安装只读 pin；Connector 仍按 ID + effective。本文 01–08 为详细规格，执行以 [00-backend-delivery.md](00-backend-delivery.md) 和 #131 为准；核心 00/01/02 已按 P 改写，执行以该文 §4 为准。**05–08 客户端/REL 详细规格尚未按 P 全文改写，只可作历史参考，执行前需同步。**
+> **2026-10-26 权威修订：P 模型（上架冻结依赖）取代 B 模型。** 权威文档：[decisions-20261026-pin.md](../decisions-20261026-pin.md)。Expert→Skill、Team→Expert 在源资源发布/提交时冻结 `target_version_id`，读取/安装只读 pin；Connector 仍按 ID + effective。本文 01–08 为详细规格，执行以 [00-backend-delivery.md](00-backend-delivery.md) 和 #131 为准；核心 00/01/02 已按 P 改写，执行以该文 §4 为准。**05–08 客户端/REL 详细规格已按 P 同步。**
 
 > **2026-10-26 整合：** GitHub 只保留 [#131](https://github.com/Mininglamp-OSS/octo-marketplace/issues/131) 作为 **octo-marketplace 唯一后端 tracking issue**；原 #132–#134 合并进 #131，#135–#137 因实现仓库是 octo-admin/web/cli/buddy 已关闭，#138 因跨仓 REL 已关闭。本文的 01–08 保留为详细规格，不再是独立 GitHub issue；执行以 [00-backend-delivery.md](00-backend-delivery.md) 和 #131 为准。
 

@@ -1,3 +1,5 @@
+> **历史记录（B 模型）：** 本文写于 P 模型（上架冻结依赖）修订之前，保留作评审证据；B/latest 结论已被 [decisions-20261026-pin.md](../decisions-20261026-pin.md) 取代。
+
 # PR #124–#127 实际实现 × v2 方案差距与待拍板决策
 
 > **2026-10-26 14:55 更新：** 用户已锁定 **B 模型**（Expert→Skill、Team→Expert 都解析最新；A09/A29-A30/共存不做；private 同 owner 允许；删除按并集保护；D4 四字段；D7 effective；D8 CAS；D9 A32 保留 URL / 新 key 最新）。本文的“建议”保留为分析背景，**已不再代表当前建议**；当前口径以 [决策记录](../decisions-20261026.md) 与 [00-decisions](../00-decisions.md) 为准。

@@ -16,13 +16,13 @@
 - 单体成功 `{data:{...}}`，列表 `{data:[...],pagination:{page,page_size,total}}`，空成功 `{data:{}}`；日期 RFC3339 UTC；page 默认1、page_size默认20/最大100。新字段 snake_case，布尔 is_/has_/can_。
 - JSON 请求拒绝未知字段、多个根值、重复键和错误类型；所有写入缺少必需字段明确400。**`relations` 显式数组仅对 A12 完整 Write 必需**：缺失或 null 为 400 `relations_required`（只有显式 `[]` 才表示清空）；A12 Skill parse-task import 不接受 `relations`，A25 的关系来自 ZIP schema2 清单，不由 HTTP `relations` 覆盖。HTTP header 大小写不敏感，约定写法不影响现有客户端。
 - JSON 错误统一 `{error:{code,message,details,hint}}`，code 只用既有12项。文件下载200为ZIP字节流，是显式包络豁免；失败仍JSON。所有内容/历史文件读取鉴权，不能返回 bucket/object key 或 storage_uri。
-- **P pin（唯一权威）：** 已发布 Expert/Team 源快照的每条 `expert_skill`/`expert_team_expert` 关系携带 `target_version_id` pin。公共读取/A01/A03/A34/安装/审核观察只读该 pin：pin 的 target version 必须存在、已正式 release，目标 plugin `status=1`、`deleted_at IS NULL`、未 embedded、`listing_state='published'`、installAccess/referenceAudience 通过；Connector 还需 effective 行。**不读取目标当前 `published_version_id`，不解析目标最新版，不回退到更新或旧版本。** 目标后来发新版不影响已发布来源；来源重新发布新版本才刷新 pin。
+- **P pin（唯一权威）：** 已发布 Expert/Team 源快照的每条 `expert_skill`/`expert_team_expert` 关系携带 `target_version_id` pin。公共读取/A01/A03/A34/安装/审核观察只读该 pin：pin 的 target version 必须存在、已正式 release，目标 plugin `status=1`、`deleted_at IS NULL`、未 embedded、`listing_state='published'`、installAccess/referenceAudience 通过；Connector 还需 effective 行。**不读取目标当前 `published_version_id`，不解析目标最新版，不回退到更新或旧版本。** 目标后来发新版不影响已发布来源；来源重新发布新版本才刷新 pin。**Team 的成员 Expert 使用 Team 快照 pin 的 Expert 版本；该版本再读它自己快照中的 Skill pins，不因 Team 读取二次解析。**
 - **冻结规则：** 草稿 `target_version_id` 可为 NULL；发布/提交（A13/A14/A25 Admin 写入）把缺失 pin 解析为目标**当时的当前正式发布版**并写入快照；显式 pin 必须属于目标且已 release，否则 400 `dependency_version_mismatch`；显式指向非正式版本 400；无可用目标 409 `dependency_unavailable`。发布后 pin 不变；已 release 的同一版本重复发布幂等，不刷新 pin。Connector 必须完全省略（NULL）。
 - **唯一解析入口与根选择：** A01、A03、A34、安装准备、审核观察复用同一个 **pin 解析服务**，不能各写一套。解析器输入为 `{root_plugin_id, root: published | explicit version_id | editing}`：A01 公共/A34 的根取来源当前 `published_version_id`；A03 的显式 `version_id` 表示历史根；A13/A14 的根取请求提交的 `version_id`（Connector 为提交时 `edit_revision`）；编辑投影取 `editing`。**显式版本根只读取该 `version_id`，绝不回读 current；依赖边只读该根快照的 pin，不再解析 latest。** A01 公共过滤的 SQL 谓词是上述 resolver 的同一语义核心（同一资格/状态/owner 范围与同一 pin 规则），仅为在 COUNT/排序/分页前过滤而作为共享 SQL 实现的特例（explicit carve-out），不得另写一套 latest；SQL 谓词与 resolver 必须有等价测试（含 Team pinned 成员链、Connector effective、缺失/非法 refs），其他手写 latest 查询视为契约违例。
 - **一致性：** 一次请求在同一个数据库一致性快照内读取完整 **pin 图**；同一源版本 + 同一组 pin 的图稳定，只有源资源重新发布才改变。不同源版本/不同 pin 的两次请求可不同，但不是同版本漂移。
 - **P 的稳定性与代价（必须写进客户端行为）：** 同一 Expert/Team 版本在 pin 不变时读取/安装得到相同依赖内容；A34 `bundle_digest` 对同一源版本 + 同一组 pin 稳定；目标发新版不影响引用方；要采用新版必须由 source owner 发布新源版本；审核冻结提交时的 pin 图，批准后不漂移；安装可复现性为“同 key 重试重放首次冻结 plan”，新 key 按当前源发布快照（含 pin），不按目标 latest。
 - **target_version_id：** Expert→Skill、Team→Expert 的**权威 pin**；草稿可省略/为 null，已发布快照必填；显式提供时必须属于目标且已 release，否则 400 `dependency_version_mismatch`；发布/提交时缺失 pin 由服务端解析，不由客户端 latest 推导。Connector 必须完全省略，null/空字符串 400 `connector_version_forbidden`。source/target `plugin_id` 是关系身份，`target_version_id` 是冻结的目标版本。
-- 市场与运行态分开：市场关系使用目标的`plugin_id`（Expert/Team 关系带权威 `target_version_id` pin；Connector 无版本），不接受本地路径或Fleet skill_id。纯本地组合不调用Marketplace，工作空间本地Skill直接推Fleet；不创建private市场中间层。system仅引用已发布system；space仅引用已发布system/同Space的space；private来源可引用已发布system、同Space的space及**同owner private**（private Expert→private Skill、private Team→private Expert 合法）；**space/system 来源不得引用 private，跨 Space 禁止；同 Space 不同 owner 的 private 仍禁止。不存在“private 一律禁止被引用”。** Team递归按 pinned 成员 Expert 同样校验。private 目标不扩大受众，A01 公共列表、A34 与安装只对同 owner 可见。访问与上下架资格沿用现有检查，不新增豁免。
+- 市场与运行态分开：市场关系使用目标的`plugin_id`（Expert/Team 关系带权威 `target_version_id` pin；Connector 无版本），不接受本地路径或Fleet skill_id。纯本地组合不调用Marketplace，工作空间本地Skill直接推Fleet；不创建private市场中间层。system仅引用已发布system；space仅引用已发布system/同Space的space；private来源可引用已发布system、同Space的space及**同owner private**（private Expert→private Skill、private Team→private Expert 合法）；**space/system 来源不得引用 private，跨 Space 禁止；同 Space 不同 owner 的 private 仍禁止。private 同 owner private→private 合法。** Team递归按 pinned 成员 Expert 同样校验。private 目标不扩大受众，A01 公共列表、A34 与安装只对同 owner 可见。访问与上下架资格沿用现有检查，不新增豁免。
 
 ### 1.2 本方案的 breaking changes
 
@@ -62,7 +62,7 @@
 
 RelationSnapshot 与上述同字段，source_plugin_id 可由所属版本推导；不允许客户端写 observed_*。**pin `target_version_id` 不进入 `content_digest`**（草稿为空、发布时才补齐），但**显式给出的 pin 属于 RelationSnapshot 身份，参与新版本/复用判定**；发布时补齐缺失 pin 不单独产生新版本。pin 是已发布快照的一部分，进入 pin 图、可用性、删除保护、A34 与安装。目标发新版不改变已发布关系的 pin、不要求来源发新版、不触发引用方重新审核；来源发布新版本才刷新未显式指定的 pin。Review 独立返回 `connector_observations:[{plugin_id,effective_revision,effective_digest}]` 和 pin 观察 `resolved_dependency_observations`，这些是服务端冻结值，不是 latest。
 
-来源仍使用既有 private 本人草稿/发布时：private 来源可引用已发布 system、同 Space 的 space 及**同 owner private**（private Expert→private Skill、private Team→private Expert 合法）；**space/system 来源不得引用 private；跨 Space 禁止；同 Space 不同 owner 的 private 仍禁止。不存在“private 一律禁止被引用”。** private 资产作为依赖时不扩大受众，A34/安装只对同 owner 可见。纯本地组合不因此纳入市场。
+来源仍使用既有 private 本人草稿/发布时：private 来源可引用已发布 system、同 Space 的 space 及**同 owner private**（private Expert→private Skill、private Team→private Expert 合法）；**space/system 来源不得引用 private；跨 Space 禁止；同 Space 不同 owner 的 private 仍禁止。private 同 owner private→private 合法。** private 资产作为依赖时不扩大受众，A34/安装只对同 owner 可见。纯本地组合不因此纳入市场。
 
 ### 2.2 PluginProjection / Detail / Version
 
@@ -287,7 +287,7 @@ schema2压缩multipart请求继续使用部署MaxArchiveBytes()（MAX_UPLOAD_MB�
 {"schema_version":"2","kind":"squad","name":"示例团队","summary":"引用市场专家的团队","instruction":"团队指令","members":[{"id":"expert-id","member_key":"lead","role":"负责人","is_leader":true,"sort_order":0}]}
 ```
 
-Expert的skills/connectors显式数组可为空；Team members为1～30。ZIP用id是原具体方案的领域格式，HTTP Relation仍target_plugin_id；只有容器parser负责转换，不要求改通用Lib。`version_id` 若给出是**显式 pin**：**不进入 content_digest**（发布时补齐导致摘要稳定），但写入已发布快照并成为读取/安装依据；省略时由写入动作解析为写入时目标当前正式发布版；不属于目标或未发布才 400 `dependency_version_mismatch`。重传按relation_type+target_plugin_id保留relation_id，关系集合/data/角色/Leader/顺序/**显式 pin**变化才计入新内容摘要；目标发新版不计入。不能接受UI的relations/manifest覆盖字段。
+Expert的skills/connectors显式数组可为空；Team members为1～30。ZIP用id是原具体方案的领域格式，HTTP Relation仍target_plugin_id；只有容器parser负责转换，不要求改通用Lib。`version_id` 若给出是**显式 pin**：**不进入 content_digest**（发布时补齐导致摘要稳定），但写入已发布快照并成为读取/安装依据；省略时由写入动作解析为写入时目标当前正式发布版；不属于目标或未发布才 400 `dependency_version_mismatch`。重传按relation_type+target_plugin_id保留relation_id，关系集合/data/角色/Leader/顺序/**显式 pin**变化才生成新版本（`content_digest` 仍不含 pin）；目标发新版不计入。不能接受UI的relations/manifest覆盖字段。
 
 A25返回`{data:{plugin,relations,relation_result?,resolved:ResolvedDependency[]}}`，Detail基础字段保持不变。`ResolvedDependency={source_plugin_id,relation_id,relation_type,target_plugin_id,target_version_id?}`，每条最终直接关系恰好一行，按sort_order/relation_id稳定排列，无依赖为[]；`target_version_id` 是**本次写入冻结的 pin**，Connector完全省略；它同时写入关系快照，是后续读取/安装唯一依据。不内含目标名称/配置或审核观察值，不把resolved误作完整图；Admin名称/正文预览使用A21有效Connector或A22 Version。
 

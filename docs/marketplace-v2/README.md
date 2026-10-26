@@ -17,7 +17,7 @@ A34 单请求完整内容读取仍为确认范围，按 P 返回“pin 图 + 全
 2. [00 · 最终决策与规则裁定](00-decisions.md)：D1–D10、C01–C08、A01–A09、迁移/审核/安装口径（已按 P）。
 3. [02 · 跨服务 API 契约](02-api-contracts.md)：A01/A34/A31/A32、DTO、错误、幂等与恢复（wire 唯一权威，已按 P）。
 4. [01 · 完整技术方案](01-technical-design.md)：领域、数据、状态、权限、读取、安装、迁移、回滚、验收（已按 P）。
-5. [开发规格与依赖图](issues/README.md)：1 个后端 tracking（#131）+ 详细规格；客户端/REL 已关闭或外部，05–08 客户端/REL 规格待按 P 同步。
+5. [开发规格与依赖图](issues/README.md)：1 个后端 tracking（#131）+ 详细规格；客户端/REL 已关闭或外部，05–08 客户端/REL 规格已按 P 同步。
 6. [plan.json](plan.json)：唯一后端 issue、仓库、API/表 owner。
 7. [execution.md](execution.md)：当前 PR 拆分、远端 issue 映射、执行顺序。
 8. [decisions-20261026.md](decisions-20261026.md)：用户决策记录与 P 取代 B 的修订节。
@@ -70,7 +70,7 @@ P 修订决策 [decisions-20261026-pin.md](decisions-20261026-pin.md) → [00-de
 
 | 规格/Issue | P 模型下的直接编码依据 | 状态 |
 |---|---|---|
-| **[MP-BACKEND #131](issues/00-backend-delivery.md)** | **唯一后端 tracking：A 版本/CAS/effective、B pin 冻结/refs/A01/A15、C A34/安装、D 迁移 CLI + 存量回填** | **进行中；PR139 为 B 实现，需按 P 重做** |
+| **[MP-BACKEND #131](issues/00-backend-delivery.md)** | **唯一后端 tracking：A 版本/CAS/effective、B（pin 冻结/refs/A01/A15 切片）、C A34/安装、D 迁移 CLI + 存量回填** | **进行中；PR139 为 B 实现，需按 P 重做** |
 | [MP-01](issues/01-version-publication.md) | 版本/文件/current-published/release、CAS、读投影、A01 底座；无 A09 | 详细规格 |
 | [MP-02](issues/02-dependency-governance.md) | pin 冻结/图读取、A01 四字段诊断、删除精确 pin、Connector effective、A25 receipts、A03/A10/A11 | 详细规格 |
 | [MP-03](issues/03-installation-fleet.md) | A34 pin 内容、A31/A32 同一 Coordinator、同 key 原 plan、新 key 按源发布快照、状态机、无共存 | 详细规格 |
@@ -84,6 +84,6 @@ P 修订决策 [decisions-20261026-pin.md](decisions-20261026-pin.md) → [00-de
 
 ## 五组评审修订状态
 
-P 决策、issues/00–04、issues/README、plan.json、README/REVIEW、执行记录已同步 P 修订，状态为“执行文档修订完成，待开发与实现验收”；核心 00/01/02 仍需按 P 同步。Admin 不用审核；通知仅审计展示；人工审核观察冲突走取消后新一轮提交；安装原 key 不因上游正常更新而改变；删除不扩大到历史关系超集。离线迁移授权以 02 §5.1 为准。
+P 决策、issues/00–04、issues/README、plan.json、README/REVIEW、执行记录已同步 P 修订，状态为“执行文档修订完成，待开发与实现验收”；核心 00/01/02 与 05–08 客户端/REL 规格均已按 P 同步。Admin 不用审核；通知仅审计展示；人工审核观察冲突走取消后新一轮提交；安装原 key 不因上游正常更新而改变；删除不扩大到历史关系超集。离线迁移授权以 02 §5.1 为准。
 
 PR 基线为 `origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）。PR #139 是 draft 的 B 模型后端实现，与 P 冲突，需按 P 重做；实施前重新核对 head，不把 PR139 当前状态当作验收通过。

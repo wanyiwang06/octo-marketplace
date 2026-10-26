@@ -1,3 +1,5 @@
+> **历史记录（B 模型）：** 本文写于 P 模型（上架冻结依赖）修订之前，保留作评审证据；B/latest 结论已被 [decisions-20261026-pin.md](../decisions-20261026-pin.md) 取代。
+
 # #131–#138 关键阻塞与修正（案例版）
 
 本文把 [issue-review-131-138.md](issue-review-131-138.md) 里的阻塞项展开成具体场景，便于产品/后端/客户端对齐。基线与决策仍以 `00-decisions.md`、`02-api-contracts.md`、`decisions-20261026.md` 为准。

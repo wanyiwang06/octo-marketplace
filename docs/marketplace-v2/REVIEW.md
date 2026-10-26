@@ -23,7 +23,7 @@
 | 3 | [00-decisions.md](00-decisions.md) | D1–D10、C01–C08、A01–A09、迁移/审核/安装口径（已按 P） |
 | 4 | [02-api-contracts.md](02-api-contracts.md) | wire 唯一权威：A01/A34/A31/A32/A03/A10/A11、DTO、错误、幂等（已按 P） |
 | 5 | [01-technical-design.md](01-technical-design.md) | 内部模型、事务、pin 图、锁、审核、安装、迁移（已按 P） |
-| 6 | [issues/README.md](issues/README.md) + [00-backend-delivery](issues/00-backend-delivery.md) | 唯一后端 tracking、A–D 工作流、详细规格（00–04 已按 P；05–08 待同步） |
+| 6 | [issues/README.md](issues/README.md) + [00-backend-delivery](issues/00-backend-delivery.md) | 唯一后端 tracking、A–D 工作流、详细规格（00–08 已按 P 同步） |
 | 7 | [plan.json](plan.json) | 机器可读依赖/所有权/API 映射（已按 P） |
 | 8 | [execution.md](execution.md) | 当前 PR 拆分、远端 issue 映射、执行顺序 |
 | 9 | [decisions-20261026.md](decisions-20261026.md) | 用户决策记录与理由（含 P 取代 B 的修订节） |
