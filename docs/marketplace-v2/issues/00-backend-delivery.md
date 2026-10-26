@@ -7,7 +7,7 @@
 ## 0. 状态与范围
 
 - 基线：`origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）。
-- 初始实现：PR #139（draft，head `0c7cc1f`）当前是 **B 模型实现**：latest resolver、A01 latest SQL、A15 批准时重解析、A34 动态依赖、安装 latest，且 `target_version_id` 仅审计/可空。**这些与 P 直接冲突，PR #139 不能按现状评审/合并，必须按 §2 重做后再验收。** 只有与依赖版本解析无关的底座（CAS、Connector effective、A34 HTTP 骨架、attempt/冻结 plan、删除保护并集骨架）可复用。
+- 初始实现：PR #139（draft，当前 head `a291294`；`main` 已合入 #140，分支 `CONFLICTING`，需先 rebase）当前是 **B 模型实现**：latest resolver、A01 latest SQL、A15 批准时重解析、A34 动态依赖、安装 latest，且 `target_version_id` 仅审计/可空。**这些与 P 直接冲突，PR #139 不能按现状评审/合并，必须按 §2 重做、整合 #140 后再验收。** 只有与依赖版本解析无关的底座（CAS、Connector effective、A34 HTTP 骨架、attempt/冻结 plan、删除保护并集骨架）可复用。
 - 范围：**仅 `octo-marketplace` 后端**。Admin/Web/CLI/Buddy 客户端、Fleet/Daemon 改动不在本 issue；它们由各仓库自行实现，不在此跟踪。
 - 不做：A09 restore、A29/A30 HTTP 迁移、同名/多版本共存、`mk1` 别名、`SKILL.md` frontmatter 改写、`installation_name`、跨 Space 私有引用。
 
