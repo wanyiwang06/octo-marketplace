@@ -54,7 +54,7 @@ D3 下 Buddy 不实现同名/多版本共存：不改写 frontmatter、不生成
 2. 删除 `marketplace-client.ts` 的依赖 ID 扇出和 `marketplace-expert-recruit-service.ts` 的 ID-only BFS 内容补齐；不得先 A03 再按依赖请求 detail/versions/skill_md/download/files。直接消费 A34 的 `schema_version/root/graph/assets/bundle_digest`，节点/缓存/归一化身份为资源+pin 版本，Connector 为 ID+effective revision，每 `node_key` 恰好一项 asset；A03 仅用于独立轻量图展示。按契约预算处理完整图，不截断或丢边。
 3. 删除生产路径中“依赖请求失败 → null → filter 丢边”“MCP 获取失败 → 旧附件/空对象/缓存配置”的分支。404、403、其他 4xx、500、网络错误及无效 JSON 均阻断本次准备/安装；按固定 reason 分别提示修复输入/权限、稍后重试读取或结果未知，不能把所有 4xx 描述为可直接重试安装。不能把缺失解释为无依赖。测试 fixture 不进入生产 fallback。
 4. 正式接入 A34 的完整图与全部 UTF-8 原始文件：Expert/Team 自身 `AGENTS.md`、Skill 的 `SKILL.md` 及全部支持文件和有效 Connector 公开声明/占位符 `mcp_config` 一次返回，不能仅消费链接/storage key。只传 `plugin_id` 及既有认证/Space 上下文，不传 workspace/runtime/custom_env/幂等 key；不新增历史根选择器。A34 不提供 `installation_name`、不重写 frontmatter 或生成安装副本。
-5. 沿用现有权限、上下架与历史受众检查；缺依赖/文件/权限/摘要错误整体失败，`budget_exceeded=413`、文件完整性=500，`no-store`，不分页/裁剪/补 latest。Buddy 校验 bundle 及全部文件路径/UTF-8/hash 与预算、graph/assets 一一映射后才产生本地副作用；任何错误不得请求历史文件接口或缓存补齐，不跨意图复用 bundle。保留 staging/原子替换与仅针对本次创建物的回滚，不删除共享文件；本地加密凭据不进入市场恢复记录。
+5. 沿用现有权限、上下架与历史受众检查；缺依赖/文件/权限/摘要错误整体失败，`budget_exceeded=413`、文件完整性=500，`no-store`，不分页/裁剪/补目标当前版。Buddy 校验 bundle 及全部文件路径/UTF-8/hash 与预算、graph/assets 一一映射后才产生本地副作用；任何错误不得请求历史文件接口或缓存补齐，不跨意图复用 bundle。保留 staging/原子替换与仅针对本次创建物的回滚，不删除共享文件；本地加密凭据不进入市场恢复记录。
    - 主进程统一 A34 transport/校验，复用既有认证与服务源，不做 base path 探测。市场 `detail` 现有 action 需要完整 Expert/Team 内容时内部切为 A34；独立摘要/历史工具可保留 A02～A08 但不能给 A34 补内容。`marketplace-handlers`、本地专家 prepare、Skill install 和 MCP install 的依赖注入一起改为已校验 bundle，不把 ContentAsset 强制 cast 成旧 `{plugin,relations}` 或 `quick_start`。版本标签取 graph 节点 `version_label`、描述取其 Manifest，内容取对应 `asset.files`，成员 wiring 只取 edge.data，有效 `mcp_config` 只取 Connector asset；成员 map/Skill map/本地来源元数据均保留 `node_key` 及 pin 版本/effective 身份，不按名字或单 `plugin_id` 合并。
    - 删除市场 A34 入口对 `normalizeMarketplaceSkillMarkdown` 的补 frontmatter/BOM 剥离和 `downloadMarketplaceSkillArchive` 补 ZIP 调用；按文件原始 UTF-8 写入 staging 并比对原字节 hash，不能校验后再改写源字节。纯本地 `importLocalSkill`、既有本地凭据存储及独立历史 ZIP 工具不属于 HTTP fallback，不因此误删。
    - `normalizeMarketplaceExpertPackage` 及 `prepareMarketplaceExpertPackage/marketplaceExpertIsCurrent` 不再用 `current_version` 展示标签判定内容相同；明确消费 `selected_version_id` 及 `bundle_digest`：同一根版本的 pin 图稳定，目标发新版不改变内容；Connector effective 变化会影响有效配置，需按本次 A34 结果区分，不能把旧 bundle 当成当前。只在显式准备/安装意图中应用读取到的内容，不新增运行中自动同步；已有本地 package 写入/staging 只在完整 bundle 校验后进入，角色/Leader/sort_order 不可丢失。不在此 adapter 中暗自按名字覆盖/新建共存规则。
@@ -77,7 +77,7 @@ D3 下 Buddy 不实现同名/多版本共存：不改写 frontmatter、不生成
 - [ ] 同一 Skill 被两个成员 pin 到同一版本时映射到同一 `node_key`；Team 成员角色/Leader/顺序完整，Connector 读取有效态。不生成 `mk1`、不改写 frontmatter、不按名字合并；共存不在本期验收。
 - [ ] 依赖 404/403/其他 4xx/500/网络/JSON 错误、缺文件、二进制、重复 MCP server key 与超预算均失败关闭；准备失败无远端 mutation、无新增本地安装，不空配置降级、不回退旧依赖。
 - [ ] 抓取一次 Expert/Team 完整内容准备的市场请求：仅一个 A34 GET 即取得准确 pin 目标、全部 `AGENTS.md`/`SKILL.md`/支持文件及有效 Connector，未发送依赖 detail/versions/skill_md/download/files 请求，未先 A03；原市场名称、frontmatter、正文及文件 hash 未变。
-- [ ] A34 错误均阻止本地副作用，无客户端补取/缓存/latest fallback；既有权限/上下架检查不变，无下架豁免。A03 独立图展示不触发完整内容扇出。
+- [ ] A34 错误均阻止本地副作用，无客户端补取/缓存/目标当前版 fallback；既有权限/上下架检查不变，无下架豁免。A03 独立图展示不触发完整内容扇出。
 - [ ] 工作空间双击/并发与窗口内断网重试复用原 key、原完整规范化请求和重新提供的相同 Secret；原键改参数冲突，不跨 URL、本地链路或 legacy fallback。
 - [ ] **D9：** 同 key 不因目标发新版而重新读取 pin 图；源资源重新发布后才提示新 key 新安装，新 key 读取当前源发布快照；pin 节点删除/下架 409 `dependency_changed`，不静默换版本或其他版本。
 - [ ] Fleet 成功但响应丢失后，窗口内原 key/原请求重试返回原 agent/squad，不重增计数；重启后无法重建参数不自动重发，本地已知成功可直接回放。
