@@ -22,8 +22,9 @@
 | 4 | [01-technical-design.md](01-technical-design.md) | 内部模型、事务、最新解析、锁、审核、安装、迁移 |
 | 5 | [issues/README.md](issues/README.md) + 8 个 issue | 交付切片、依赖、验收、PR 映射 |
 | 6 | [plan.json](plan.json) | 机器可读依赖/所有权/API 映射 |
-| 7 | [decisions-20261026.md](decisions-20261026.md) | 用户决策记录与理由（含 D4/D7/D8/D9 解释） |
-| 8 | [review/](review/) | 决策前的代码事实审计与 PR 差距（历史背景，结论以 00 为准） |
+| 7 | [execution.md](execution.md) | 当前 PR 拆分、远端 issue 映射、执行顺序 |
+| 8 | [decisions-20261026.md](decisions-20261026.md) | 用户决策记录与理由（含 D4/D7/D8/D9 解释） |
+| 9 | [review/](review/) | 决策前的代码事实审计、PR 差距、#131–#138 issue 评审（历史背景，结论以 00 为准） |
 
 ## 2. 已锁定的 12 条决策
 
@@ -113,12 +114,12 @@
 | PR | 状态 | 评审结论 |
 |---|---|---|
 | #124 | 已合入 | 保留版本/发布底座；需补 CAS、Connector effective、读投影；不补 A09 |
-| #125 | 已合入 | refs 改浮动（`target_version_id` 仅审计）、删除并集、private 同 owner、observations |
-| #126 `e7ffc79` | 核验时开放；#128 为替代候选 | 两套安装器、重试重读 live、指针回滚、`mk1`、无冻结 plan；按 MP-03/04 重做 |
-| #127 | 开放，**不要按现状合并** | `dependency_issues` 旧 DTO、只诊断 published/pin、无 view/四字段/匿名；保留 SQL 前置思路重做 |
-| #128 `3467a39` | 核验时开放，尚未按 B/D 完成 | 保留 inline 负校验、锁前文件冻结、readiness SQL、过期回执说明；改固定 pin/mk1/live Connector、legacy 执行器、重解析重试及指针回滚。 |
+| #125 | 已合入 | refs 改浮动（`target_version_id` 仅审计）、删除并集、private 同 owner、observations；需放宽 refs CHECK 并清理 `rejectPublishedMutation` 总禁令 |
+| #126 `e7ffc79` | 已关闭，未合入 | 不作为基线；其内容被 #128 替代 |
+| #127 `016baef` | 开放，**不要按现状合并** | `dependency_issues` 旧 DTO、只诊断 published/pin、无 view/四字段/匿名；保留 SQL 前置思路重做 |
+| #128 `3467a39` | **已合入 main `eec5223`** | 保留 inline 负校验、锁前文件冻结、readiness SQL、过期回执说明；但 main 仍含 `mk1`/固定 pin refs CHECK/指针回滚/直接 release 迁移等需按 MP-02/03/04 清理的行为。 |
 
-以上为 [2026-10-26 核验快照](review/diff-verification-20261026.md)，不是当前远端实时状态；实施前复核 head 和合并状态。#126/#128 按替代关系选基线，不重复合入。
+当前 remote 基线为 `origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）。本地 checkout 可能落后，实施前先 fetch。以上 #126/#128 的关系是“替代”，不是同时合入；`mk1`/指针回滚只在 main 的既有代码中，必须显式移除，不能当作新能力保留。
 
 ## 6. 验证状态
 

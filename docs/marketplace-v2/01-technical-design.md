@@ -46,7 +46,7 @@ flowchart LR
     F --> W[Workspace / Daemon]
 ```
 
-沿用 Handler → Service → Repository。集中逻辑只有：最新发布解析、依赖策略、快照 codec、图/文件解析、安装身份及协调。A01 公共过滤、A03 图、A34 完整内容、安装和审核观察必须复用同一个最新发布解析服务，不能各自写一套 SQL 或各自补 latest；安装物化与 Fleet 序列化留在解析之后。
+沿用 Handler → Service → Repository。集中逻辑只有：最新发布解析、依赖策略、快照 codec、图/文件解析、安装身份及协调。A01 公共过滤、A03 图、A34 完整内容、安装和审核观察必须复用同一个最新发布解析器；A01 因需在 COUNT/排序/分页前过滤，允许把解析器的同一语义核心下推为 SQL 谓词，但该谓词必须由共享规则生成/校验并有等价测试，不得另写一套 latest 逻辑或逐卡补 latest；安装物化与 Fleet 序列化留在解析之后。
 
 | 内容 | 权威 |
 |---|---|
@@ -66,12 +66,14 @@ flowchart LR
 ### 2.1 最新发布解析服务（唯一解析入口）
 
 - 可用定义：目标 `published_version_id` 非空，且 `status=1`、`deleted_at IS NULL`、`listing_state='published'`。不满足即依赖不可用，**不回退旧版本**。
+- 解析器输入固定为 `{root_plugin_id, root: published | explicit(version_id) | editing}`（Connector 根为 `effective`，无 version_id）：A01 公共、A34 与安装首次解析用 `published`；A01 `mode=mine`/编辑视图用 `editing`；A03 历史根用显式 `version_id`；A13/A14 用请求提交的 `version_id`（Connector 用当前编辑修订）。显式 version 必须归属 `root_plugin_id` 且已 release；解析不得对显式 version 回读 current，也不得把 `published` 重新解释成 current。
 - 一次请求（A01/A03/A34/安装/审核观察）在同一数据库一致性快照内解析完整图，避免"列表显示 v2、安装用 v3"。
 - 解析结果按 `plugin_id@version_id`（Connector 为 `plugin_id@effective_revision`）标识；解析不读 current、不读软删数据、不按名称/内容匹配。
 - 任一节点不可用即整图不可用：公共列表隐藏来源、A34/安装整体失败、人工审核返回 `dependency_changed`；不裁剪、不跳文件、不删边。
 - Team 递归：Team → 成员 Expert 当前正式发布版 → 该 Expert 的当前正式发布版 Skill/Connector；任一节点不可用整图不可用。Team 边的 `member_key/role/is_leader/sort_order` 仍由 Team 快照决定，不随成员 Expert 发新版变化。
 - 图/文件预算按 02 §2.4/§6.1：1500 节点（含根）、2000 边、16MiB 等，按解析后的资源＋版本/有效修订计数。
 - `target_version_id` 只能在解析完成后写入"上次解析/审计"字段，不能反向参与解析、可用性判定、删除保护、A34、安装或审核比对。
+- A01 的 SQL 可用性谓词是上述解析器的同一语义核心下推（同 owner、同可用定义、同 Team 一跳展开）；由共享规则生成或对 resolver 做等价测试，且只有这一处共享 SQL 实现；其他读取不得手写 latest，也不得在 Service/前端事后过滤。
 
 ## 3. 数据模型
 
@@ -86,11 +88,15 @@ flowchart LR
 | plugin_version_releases | `plugin_id`、`version_id`、`version_label`、`released_at`、`released_by`；`unique(version_id)`、`unique(plugin_id,version_label)` | 发布事务 |
 | plugin_relations | `target_version_id` nullable，语义为"上次解析/审计值"，可省略/为 null；Connector 关系必须完全省略；保留 `relation_id`/`sort_order`/`data` | current 全量关系同步 |
 | plugin_version_relation_refs | `source_plugin_id`/`source_version_id`、`relation_id`/`type`、`target_plugin_id`、`target_version_id` nullable；`PK(source_version_id,relation_id)`，索引 `target_plugin_id`、`target_version_id`；`target_version_id` 不参与可用性和删除保护判定 | 与快照同事务，仅插入/重建，无业务独立修改 |
-| plugin_connector_effective | `plugin_id` PK、`effective_revision` bigint、`effective_digest`、`manifest_json`、`plugin_json`、`attachment_keys_json`、`activated_at`；只保存最近批准的完整有效内容 | Connector 发布/批准事务 |
+| plugin_connector_effective | `plugin_id` PK、`effective_revision` bigint、`effective_digest`、`manifest_json`、`plugin_json`、`attachment_keys_json`、`activated_at`；只保存最近批准的完整有效内容。切换前把存量 Connector 回填为 revision 1 + 按 §3.2 计算的 digest；回填前缺失 effective 行的旧 Connector 不可引用/安装 | Connector 发布/批准事务；MP-01 增量 migration/backfill |
 | plugin_review_requests | `source_version_id` nullable、`source_edit_revision`、`frozen_content_digest`、`connector_observations_json`、`resolved_dependency_observations_json`（提交时解析到的 Expert/Skill 版本与该 Expert 的 Connector 观察，字段名以实现时与 02 同步为准）、`baseline_version_id` 及 `dependency_diff_json`（按提交时 published 根冻结的关系集合差异，随附标签仅审计）；Connector 冻结完整编辑内容，无业务 version_id | MP-01 保存/发布底座；MP-02 审核观察、diff 与端点接入 |
-| plugin_install_attempts | `attempt_id`、`caller_id`、`space_id`、`workspace_id`、`client_key_hash`、`fleet_key`、`root_plugin_id`/`root_version_id`、`intent_digest`、`input_hmac`、`hmac_key_id`、`transform_variant`、`plan_object_key`/`plan_digest`、`fleet_request_hmac`、`state`、`dispatch_owner`、`lease_until`、`first_dispatched_at`、`result_json`、`created_at`/`updated_at`、`retry_until`；`unique(caller_id,workspace_id,client_key_hash)`。`root_version_id` 与 plan 内依赖版本均为首次冻结的解析结果，不随后续发布变化 | 安装协调器；`intent_digest` 只覆盖归一化非 Secret 意图，供已知成功回放核对 |
-| plugin_dependency_migration_map | `run_id`、`source_kind`、`source_scope`、`source_identity`（均非空）、`source_plugin_id`/`source_version_id` nullable、`source_digest`、`plan_digest`、`source_node_key`、`target_plugin_id`/`target_version_id` nullable、`step_state`、`source_commit_json` nullable、`error_reason`；`unique(source_scope,source_identity,plan_digest,source_node_key)` | CLI 迁移与 apply 同 issue 交付；root 占位仲裁唯一 run，`source_commit_json` 记录本次来源切换的输出版本/修订及审核 ID。batch/run 状态表字段沿 CLI 需要定义（实现时确认），不新增 HTTP 端点 |
+| plugin_install_attempts | `attempt_id` PK、`caller_id`、`space_id`、`workspace_id`、`client_key_hash`、`fleet_key`（固定为 `attempt_id`）、`root_plugin_id`/`root_version_id`、`intent_digest`、`input_hmac`、`hmac_key_id`、`plan_object_key`/`plan_digest`、`fleet_request_hmac`、`state`（`prepared/dispatching/succeeded/failed/unknown/expired`）、`dispatch_owner`、`lease_until`、`first_dispatched_at`、`result_json`、`created_at`/`updated_at`、`retry_until`；`unique(caller_id,workspace_id,client_key_hash)`。`root_version_id` 与 plan 内依赖版本均为首次冻结的解析结果，不随后续发布变化；`intent_digest` 只覆盖归一化非 Secret 意图，不含解析出的任何版本 | 安装协调器；从 #128 旧 `(space_id,caller_uid,workspace_id,key_digest)` 主键与 `adapter_version`/`completed` 增量迁移，旧 completed 行只按已验证结果映射 `succeeded`，否则 `unknown`/人工 |
+| plugin_dependency_migration_map | `run_id`、`source_kind`、`source_scope`、`source_identity`（均非空）、`source_plugin_id`/`source_version_id` nullable、`source_digest`（即 02 的 `input_digest`，不是第二套摘要）、`plan_digest`、`source_node_key`、`target_plugin_id`/`target_version_id` nullable、`step_state`、`source_commit_json` nullable、`error_reason`；`unique(source_scope,source_identity,plan_digest,source_node_key)` | CLI 迁移与 apply 同 issue 交付；root 占位仲裁唯一 run，`source_commit_json` 记录本次来源切换的输出版本/修订及审核 ID |
+| plugin_dependency_migration_runs | `run_id` PK、`source_scope`/`source_identity`/`plan_digest`（非空）、`frozen_plan_object_key`（或等价不可变 plan 原文）、`status`（`completed/waiting_review/blocked`）、`root_node_key`、`created_at`/`updated_at`、`last_authorization_id`；`unique(source_scope,source_identity,plan_digest,root_node_key)` 仲裁同一冻结计划的 run。`resume --run-id` 从该行恢复，不重建已提交步骤 | MP-04；优先复用/演进 `plugin_stock_migration_batches/roots`，不得形成第二套 run 账本（表名实现时确认）；冻结 plan/run 增量 DDL 与 map 同批 |
+| plugin_migration_authorizations | `authorization_id` PK、`batch_id`、`run_id` nullable（首次 apply 原子绑定）、`actor_id`、`environment_id`、`key_id`、`source_scope`/`source_identity`/`plan_digest`、`issued_at`/`expires_at`、`revoked_at` nullable、`created_at`；`authorization_id` 唯一绑定一个批次与原 run，续签记更替审计 | MP-04 离线授权校验与绑定；字段/索引细节实现时确认 |
 | plugin_mutation_receipts | `actor_id`、`operation`、`resource_scope`、`key_hash`、`input_digest`、`result_ids_json`、`created_at`、`completed_at` nullable；唯一域含前三项和 `key_hash` | Admin 导入/重传与结果同事务写 `completed_at`；迁移非终态只关联 run，真正完成才写 `completed_at` 并起算回放保留期 |
+
+**refs 约束增量（MP-01/MP-02 owner）：** 现有 `chk_plugin_version_ref_type` 要求 `expert_skill`/`expert_team_expert` 的 `target_version_id` 非空，`ValidateReferenceMetadata` 对 nil 返回 `ErrInvalidRelation`；必须用增量 ALTER 放宽为“仅 `expert_connector` 必须为 NULL”，并修改 `internal/repository/plugin/references.go` 与 `internal/model/plugin_snapshot.go` 允许 Expert→Skill、Team→Expert 省略/为 null；refs 插入与快照投影同样允许 NULL。`target_version_id` 不进入 `content_digest`、可用性、删除保护、A34、安装或审核比对。测试必须覆盖“省略合法；显式值须属于目标且已 release；Connector 带值 400 `connector_version_forbidden`”。
 
 安装尝试中不保存 Token、custom_env、完整含凭据请求。`input_hmac/fleet_request_hmac` 使用服务端独立 HMAC 密钥并记录 key ID；旧密钥保留到相关尝试终结。密钥不进入源码、文档或日志。计划仅保存校验后的资产声明、首次冻结的物化内容/对象引用、Connector 有效配置和 bindings，不含运行时 Secret；MCP 只允许占位符和公开配置，实际凭据只能由安装 custom_env 传 Fleet。
 
@@ -108,6 +114,8 @@ flowchart LR
 
 版本标签为 MAJOR.MINOR.PATCH；草稿可多次保存同一候选标签，但正式发布时同一资源标签只能对应一个正式版本；新发布标签必须大于该资源最高已发布标签。精确重复发布同一版本幂等，不重复 release。不与尚未发布的更高 current 标签比较，避免批准 v2 时被 current v3 草稿阻塞。
 
+`effective_digest` 覆盖完整有效行：canonical Manifest/Package、生效受众（`declared_visibility` 的生效值）、`attachment_keys_json` 的路径/大小/原字节摘要，以及 Connector 的公开配置/Secret 占位符；不覆盖 `activated_at`、数据库对象 key、审核/时间戳/修订号字段。存量 Connector 回填 revision 1 时由同一 codec 生成该摘要；A34 服务端按完整 effective payload 校验，客户端不得只对 `mcp_config` 重算。
+
 `content_digest`/`effective_digest` 及迁移 input/source 摘要由服务端统一 codec 生成，对客户端是不透明值，不要求客户端另建算法。A34 `bundle_digest` 和冻结 `plan_digest` 分别按 API 定义的 JCS 字段域及排序计算；不得混用这几种摘要。A34 的 `bundle_digest` 在 B 下随解析结果变化，不得用于判定"同一 Expert/Team 版本内容未变"。
 
 不提供 restore-to-draft：历史内容不能"还原为草稿"（A09 撤回）。需要恢复内容时按显式迁移或"以历史为输入发布新版本"处理，历史快照本身不可改写。
@@ -122,16 +130,18 @@ flowchart LR
 
 不重设角色、User/Bot 鉴权、owner 提交资格、Space 审核权限、通知或人工审核入口。Space 保留现有自动审核开关及其 owner/admin 管理权限：默认自动（`plugin_review_policies` 在 Space 无单独配置时 `IsAutoApproveEnabled=true`），Space 显式关闭后进入既有人工审核；保留 `isReviewer` 的现有授权判定，不新增跨 Space 权限。平台资产继续走现有 Admin 管理面。
 
+**Admin 无资产审核（D7）：** Admin create/update/reupload 直接生效并同步 effective/release，不创建 pending review、不进入审核队列；Admin 仍执行 CAS、权限、引用矩阵与最新图校验。只有 Tenant Connector/Expert/Team 按 Space 策略自动或人工审核。生产迁移的离线执行授权是计划执行许可，不等同于 Admin 资产审核。
+
 本次变化是被审核的内容与发布事务：指定不可变版本，按最新发布解析校验完整依赖图与已确认的 system/Space/private 矩阵，批准只推进 published 而不覆盖 current。自动审核与人工审核都执行相同解析和发布事务；自动审核不是跳过校验，也不要求用户重新配置现有策略。
 
 ### 4.1 版本化资源
 
 1. 普通创建/保存：结构校验 → 读锁定前候选图 → 锁内重验与 CAS → 同步 current 行和编辑关系 → 写不可变版本/refs → current 指向新快照；不切 published。现有 Admin 直接写入动作按 §4.2 映射，不用此规则改成新的审核/保存矩阵。
-2. 编辑必须提交 `expected_edit_revision`；不匹配 409 `edit_conflict`，避免 read-modify-write 静默覆盖。新建必须省略。版本化资源的关系数组必须显式提供，空数组才代表清空，缺失 400 `relations_required`，不再隐式删除。
+2. 编辑必须提交 `expected_edit_revision`；不匹配 409 `edit_conflict`，避免 read-modify-write 静默覆盖。新建必须省略。`relations` 必填只适用于 A12 完整 Write（Expert/Team 内容与关系；空数组才代表清空，缺失 400 `relations_required`）；A12 Skill import 不接 `relations`，Skill 最终关系为 `[]`；A25 Expert/Team 的关系来自 ZIP 清单，不要求另传 relations。
 3. 发布指定 `version_id`：检查所属、完整文件、当前权限、正式标签，并按最新发布解析校验该版本声明的依赖集合（Expert→Skill、Team→Expert 解析目标当前正式发布版；Connector 读 effective）。保留既有 private 直接发布行为，但不扩大受众、不新增 private 市场依赖；space 冻结审核并按现有策略自动批准或人工审核；system 由现有 Admin 管理面发布。
 4. 发布事务只登记 release、切 published、切有效受众、更新 listing。不得将冻结内容、关系或附件写回 current。批准 v2 时 current v3 必须完整保留，不只保留指针。
 5. 同一资源最多一个 pending review。批准/拒绝/取消均 CAS pending。已批准同一请求返回原结果，不能重新激活旧发布版。
-6. 审核观察（B 核心）：提交时用最新发布解析服务把全部跟随依赖的当前版本记录进审核快照——Expert/Skill 记录解析到的 `plugin_id@version_id`，Connector 记录 `effective_revision`/`effective_digest`；Team 还要记录成员 Expert 的解析版本及其 Skill/Connector。观察值是审核窗口的一致性证据，不是 pin，不得写回来源快照。
+6. 审核观察（B 核心）：提交时用最新发布解析服务把全部跟随依赖的当前版本记录进审核快照：`resolved_dependency_observations`（Expert/Skill 的 `plugin_id@version_id`）与 `connector_observations`（`effective_revision`/`effective_digest`）；Team 还要记录成员 Expert 的解析版本及其 Skill/Connector。观察值是审核窗口的一致性证据，不是 pin，不得写回来源快照。
 7. 批准时重新解析：自动模式内部重新解析并重试一次（正常不把 409 暴露给用户）；人工模式（Space 显式关闭自动审核）若观察值变化返回 409 `dependency_changed`，由有权取消者取消旧申请，再由有权提交者重新提交并生成新的 review_id；审核人查看新申请后批准。批准本身只推进 published/effective 与受众，不写回 current。
 8. 批准后依赖继续浮动；**Skill/Expert 发新版不需要重新审核引用它的 Expert/Team**。只有 Expert/Team 自身内容或依赖集合（引用哪些目标、角色/Leader/顺序）变化，才需要新版本并重新审核。
 
@@ -143,20 +153,22 @@ flowchart LR
 |---|---|---|
 | Admin 创建/导入 | 创建完整快照、refs 及 release，同事务设置 current/published；按最新解析校验依赖可用性，不合法则失败 | 创建 system 资产即发布，附带可见 default 投放，沿用现有 Admin 鉴权 |
 | Admin 内容更新/重传 | 内容或关系变化创建新 current 快照；现有直接生效的发布内容同步登记 release 并切 published，不把未发布内容暴露给消费者 | 保留现有 listing、owner、Space 和 visibility，不按新 system/tenant 矩阵改动作，不借更新上下架或附加 default 投放 |
-| 既有发布/审核 | 对指定完整快照执行同一最新解析校验，推进 published，不覆盖更新的 current | 现有入口、角色、Space 自动审核策略和访问检查 |
+| Tenant 既有发布/审核 | 对指定完整快照执行同一最新解析校验，推进 published，不覆盖更新的 current | 现有入口、角色、Space 自动审核策略和访问检查；Admin 不进入此队列 |
 | 评分/投放可见性 | 不创建内容版本，不切发布指针 | 现有运营动作；非默认场景可配置可见性，default 不能隐藏 |
 
 **已确认：**Admin 专家/专家团无依赖选择器、无页面关系覆盖，只上传/重传 ZIP，清单中的 Skill/Connector/成员 Expert **ID** 是最终关系集合；保留原 import/reupload 路径与 `schema_version=2`。清单里的 `version_id` 只作为"目标须已发布"的提示与审计值，不是解析依据（提供时校验目标归属和 release；与本次最新解析版本不同不报错，按 02 §4 返回 `resolved[]`）。Admin 默认 current，版本详情里的 `is_released` 只是读取投影。A20 安全状态 API、A28 Admin 发布 API、新增重新上架按钮/接口均已撤回。
+
+**Admin 读取/写入 wire（02 §3.3）：** A21 默认 editing/current，仅 Connector 详情可显式 `view=effective`；Admin DTO 省略 `published_version_id`。A22 必须带精确 `version_id` 并校验归属，Connector 400 `unsupported_type`；A23 缺省 current 并返回实际 `version_id`，不能冒用 published；A26 重传必须带 `expected_edit_revision`。错误 reason 固定：A24 对 Expert/Team 用 `zip_only_required`；Connector 带版本 `connector_version_forbidden`；审计 `target_version_id` 不属目标/未发布 `dependency_version_mismatch`；view 非法 `view_invalid`（`details.field=view`）；源版本/refs 自相矛盾 500 `relation_index_inconsistent`，refs 一致但目标缺失才是正常 `dependency_unavailable`。
 
 以上依据源码静态核对，不代表已部署 UI 或运行验证；AdminUpdate 的既有内容写入权限和效果不以新矩阵重定义。
 
 ### 4.3 Connector
 
-Connector 不写新 `plugin_versions`/release，不支持版本 pin 或历史恢复。`plugins` 的 Manifest/Package 是授权编辑态；发布或批准时原子替换 `plugin_connector_effective`，`effective_revision` 单调增加、`effective_digest` 覆盖有效内容，列表/A34/安装读有效态。首次未批准没有 effective 行，不能引用。
+Connector 不写新 `plugin_versions`/release，不支持版本 pin 或历史恢复。`plugins` 的 Manifest/Package 是授权编辑态；发布或批准时原子替换 `plugin_connector_effective`，`effective_revision` 单调增加、`effective_digest` 覆盖完整有效行（§3.2），列表/A34/安装读有效态。切换前必须把存量 Connector 回填为 revision 1 + digest；首次未批准且无回填行的 Connector 不能引用。
 
-Connector 沿用现有 Admin 写入、发布及审核动作；既有直接生效的写入同步更新 effective，需审核的编辑仍在批准后生效，不引入按上下架分类的新保存矩阵。其 `edit_revision` 与 `effective_revision` 分开。专家/团队提交审核时递归记录全部 Connector 的 `effective_revision`/`digest`；批准时变化返回 `dependency_changed`。专家保存快照只固定 Connector 身份（ID），专家批准后的 Connector 正常更新不生成来源新版本。
+Connector 沿用现有 Admin 写入/发布动作与 Tenant 审核策略；Admin 系统 Connector 的既有直接生效写入同步更新 effective，不进入 pending review；Tenant 需审核的编辑在批准后生效，不引入按上下架分类的新保存矩阵。其 `edit_revision` 与 `effective_revision` 分开。专家/团队提交审核时递归记录全部 Connector 的 `effective_revision`/`digest`；批准时变化返回 `dependency_changed`。专家保存快照只固定 Connector 身份（ID），专家批准后的 Connector 正常更新不生成来源新版本。
 
-A15 保留现有审核元信息、`readme_content` 和 `frozen_relations`，补明确的 `frozen_version` 或 `frozen_connector`、`source_edit_revision`/`frozen_content_digest`、`connector_observations`、解析依赖观察值和冻结 `dependency_diff`，详情重字段不进队列列表。diff 以提交时 published 基线冻结，不向 current 扇出补正文；随附标签是提交时解析值，仅审计/提示，不构成 pin。Connector 自身提审记录提交时 effective 基线（首次可 null），批准前若已有新的有效内容则 `dependency_changed`；只保存更新 editing 不误判。字段、空值和差异前后态按 API §2.3，不自造 snapshot 格式，解析失败不能吞成无依赖。
+A15 保留现有审核元信息、`readme_content` 和 `frozen_relations`，补明确的 `frozen_version` 或 `frozen_connector`、`source_edit_revision`/`frozen_content_digest`、`connector_observations`、`resolved_dependency_observations` 和冻结 `dependency_diff`，详情重字段不进队列列表。diff 以提交时 published 基线冻结，不向 current 扇出补正文；随附标签是提交时解析值，仅审计/提示，不构成 pin；`dependency_diff` 只含 relation ID/type/sort_order/data/role/order，审计 target version 只展示、不参与 diff 或触发重审。Connector 自身提审记录提交时 effective 基线（首次可 null），批准前若已有新的有效内容则 `dependency_changed`；只保存更新 editing 不误判。字段、空值和差异前后态按 API §2.3，不自造 snapshot 格式，解析失败不能吞成无依赖。
 
 ## 5. 依赖策略与生命周期
 
@@ -168,11 +180,11 @@ A15 保留现有审核元信息、`readme_content` 和 `frozen_relations`，补�
 | expert | expert_connector | connector | 按 ID 读 `plugin_connector_effective` 当前有效修订；无 effective 行即不可用；禁止 `target_version_id` |
 | expert_team | expert_team_expert | expert | 每次解析成员 Expert 当前正式发布版；该 Expert 的 Skill/Connector 同样解析最新；`member_key`/`role`/`is_leader`/`sort_order` 仍由 Team 边决定 |
 
-`target_version_id` 在 versioned 关系中可省略、可为 null，仅作为上次解析/审计值保存；解析、可用性、A03/A01、A34、安装、审核比对和删除保护一律不使用它，客户端不能靠它固定依赖。
+`target_version_id` 在 versioned 关系中可省略、可为 null，仅作为上次解析/审计值保存；解析、可用性、A03/A01、A34、安装、审核比对和删除保护一律不使用它，客户端不能靠它固定依赖。数据库 `chk_plugin_version_ref_type` 必须从"这两类非空"放宽为"仅 Connector 必须 NULL"，`ValidateReferenceMetadata` 同步允许 nil（§3.1）；Connector 关系写入 NULL，null/空字符串都按 400 `connector_version_forbidden`。
 
 同来源同关系/目标不得重复。每 Expert 最多 20 Skill、20 Connector；Team 1～30 成员、唯一 `member_key`、唯一目标 Expert、恰好一个 Leader。成员 `data` 只允许 `member_key`/`role`/`is_leader`（三项必填）；`role` 非空、最多 500 个 Unicode 字符，`member_key` 为 1～64 字符 `[a-z][a-z0-9_-]*`；`sort_order` 非负。非 Leader 的 `role` 去除首尾空白后不得为 Fleet 保留值 `leader`，否则 400 `team_wiring_invalid`，不自动改角色。成员名称唯一性按本次解析后的目标名称校验（Fleet Definition `experts.name` 唯一），冲突整体失败、不自动改名（错误原因固定为 `team_member_name_conflict`）。Expert/Team Package 只有自身 AGENTS.md，拒绝内联 Skill/MCP、内联成员或隐藏旧格式附件。
 
-**引用矩阵：**system 来源只能引用 system 目标；space 来源只能引用 system 或**同 Space** 的 space 目标；private 来源可引用 system、同 Space 的 space，以及**同 owner 的 private** 目标。**space/system 来源不得引用 private 目标**；任何来源都禁止跨 Space 目标。Team 递归展开最新成员 Expert 时同样校验，Admin 可见不能绕过。私有资产作为依赖时不扩大受众：A34/安装只对同 owner 可见。既有 private/draft 字段或历史记录保留隔离，不把 private 等同 draft，也不擅自公开或删除旧数据。无权目标失败关闭。
+**引用矩阵：**system 来源只能引用 system 目标；space 来源只能引用 system 或**同 Space** 的 space 目标；private 来源可引用**已发布** system、同 Space 的 space，以及**同 owner 的 private** 目标。**space/system 来源不得引用 private 目标**；任何来源都禁止跨 Space 目标。Team 递归展开最新成员 Expert 时同样校验，Admin 可见不能绕过。私有资产作为依赖时不扩大受众：A34/安装只对同 owner 可见。既有 private/draft 字段或历史记录保留隔离，不把 private 等同 draft，也不擅自公开或删除旧数据。无权目标失败关闭。
 
 历史读取（A04～A08 等显式版本读取）仍取"目标当前有效范围 ∩ 该版本 `declared_visibility`"的受众交集；资源从 private 发布为 system/space 不能顺带公开旧 private 历史。该交集只约束历史内容读取，**不参与 B 的依赖解析**。旧历史缺可证明受众信息时不自动按当前更宽范围公开，只允许 owner/Admin 取证并要求显式转换后发布新版本。
 
@@ -181,13 +193,13 @@ A15 保留现有审核元信息、`readme_content` 和 `frozen_relations`，补�
 - 保存新引用/修改关系集合/发布新来源版本：目标为独立市场资产，满足既有访问资格、未删除、**当前已有正式发布版**或 Connector 已有 effective，并通过引用矩阵；不要求也不记录 pin。解析只能发生在发布事务内的一次一致性读取，不能"校验时 v2、发布后 v3"。
 - 安装已发布图/A34：按既有访问检查校验根与每个依赖的**最新解析结果**、完整文件与完整图；下架或删除依赖不获得新增安装豁免。缺失、不可访问或不满足资格时整图明确失败，不补 latest、不删边、不降级。
 - 下架：保留既有审核者权限、listing 变更及取消 pending 行为，不新增分类、按钮或授权动作，不把保留历史字节解释为继续安装授权。下架最新版会使所有引用它的 Expert/Team 在公共列表隐藏、A34/安装失败。
-- 删除：保护集合 = live incoming（含草稿）∪ published refs ∪ 成员 Expert 间接引用；**不新增"曾发布即禁止删除"**。引用式新 Expert/Team 只删除自身及自身关系，不删除独立共享 Skill/Expert。旧 embedded 历史只按显式迁移处理，不全局清理。
+- 删除：保护集合 = live incoming（含草稿）∪ 未删除来源当前 `published_version_id` 的 published refs ∪ Team 间接引用（一跳成员 Expert → 该 Expert 当前 `published_version_id` 的 refs）。**移除 `rejectPublishedMutation` 对删除的总禁令，不新增"曾发布即禁止删除"**；历史发布版不是保护超集，Expert 新版本移除的旧 Skill 不再由 Team 保护。引用式新 Expert/Team 只删除自身及自身关系，不删除独立共享 Skill/Expert。旧 embedded 历史只按显式迁移处理，不全局清理。
 - 投放：保留非默认场景已有可见性配置，default 投放不能隐藏；不扩展为新的隐藏或重新上架流程。
-- 来源可见范围变更：沿用现有权限及访问检查，将编辑意图（`declared_visibility`）与有效发布受众（`plugins.visibility`）隔离；发布时按最新图重验 outbound 及现有 incoming 保护，不借 metadata 扩大历史版本受众。不改变既有"已发布资源收窄 visibility"的行为，也不新增缩权运营动作（本期只改删除保护，不改收窄行为）。
+- 来源可见范围变更：沿用现有权限及访问检查，将编辑意图（`declared_visibility`）与有效发布受众（`plugins.visibility`）隔离；发布时按最新图重验 outbound 及现有 incoming 保护，不借 metadata 扩大历史版本受众。不改变既有"已发布资源收窄 visibility"的行为，也不新增缩权运营动作（本期只改删除保护，不改收窄行为；`rejectPublishedMutation` 的移除只针对 Delete/DeleteGraph 的删除判定，不把删除并集复用到可见性收窄）。
 
 ### 5.3 保护查询与事务
 
-删除保护为并集：先保留现有 `repository/plugin/write.go:996-1008` 的 live 检查（active 来源、`r.status=1`、来源和关系均未删除，不按 listing 过滤），再从**未删除来源的 `published_version_id`** 进入不可变 refs，按 `target_plugin_id` 判定，而不是按 refs 里的 `target_version_id` 判定；最后展开"已发布 Team 快照 → 成员 Expert（按 ID）→ 该 Expert 已发布快照 refs"的间接引用。草稿中的有效 live 引用仍保护目标；current 已删边但 published 仍引用时也继续保护。不能用 current 关系代替发布图，也不能用发布图替代原 live 保护。间接展开只取成员 Expert 当前正式发布版；不能扫描其全部历史发布版扩大保护，历史记录仅用于审计。
+删除保护为并集：先保留现有 `repository/plugin/write.go:996-1008` 的 live 检查（active 来源、`r.status=1`、来源和关系均未删除，不按 listing 过滤），再从**未删除来源的当前 `published_version_id`** 进入不可变 refs，按 `target_plugin_id` 判定，而不是按 refs 里的 `target_version_id` 判定；最后展开"已发布 Team 快照 → 成员 Expert（按 ID）→ 该 Expert 当前 `published_version_id` 的 refs"的间接引用，只有一跳成员 Expert，不再展开第二个 Team，也不读该成员 Expert 的历史发布版。草稿中的有效 live 引用仍保护目标；current 已删边但 current `published_version_id` 仍引用时也继续保护。不能用 current 关系代替发布图，也不能用发布图替代原 live 保护。间接展开只取成员 Expert 当前正式发布版；不能扫描其全部历史发布版扩大保护，历史记录仅用于审计。Expert 发布 e2 去掉 S 后，Team 对该 Expert 的边只保护 e2 的 refs，S 失去 Team 保护；若没有其他 live incoming 或 current published refs，S 可删。`rejectPublishedMutation` 对 Delete/DeleteGraph 的总禁令移除；可见性收窄保持既有行为，不在本并集范围内。
 
 全局锁顺序：review request（存在时）→ 涉及的全部 Plugin 行按 `plugin_id` 排序（包括来源及全部间接目标）→ Version 行按 `version_id` 排序 → effective/placement/refs。需预读图才能知道锁集时，先读版本 ID/依赖 ID，获得锁后重读比较；变化则重算，不在锁内做 OSS/Fleet I/O。保存、发布、审核、删除/缩权使用同一策略和锁序；死锁最多重试 3 次，超过返回 CONFLICT，不绕过校验。
 
@@ -197,7 +209,7 @@ A15 保留现有审核元信息、`readme_content` 和 `frozen_relations`，补�
 
 ### 6.0 读取投影总则
 
-市场列表/详情、A34、安装根取 published（按最新解析）；作者编辑必须显式 `view=editing`；Admin 默认 current；版本详情精确取 `version_id`。普通消费者只能取其有权的正式版本，不能因知道 ID 读历史草稿。Connector 对应 reading view 为 effective/editing。
+市场列表/详情、A34、安装根取 published（按最新解析）；作者编辑必须显式 `view=editing`；Admin 默认 current；版本详情精确取 `version_id`。普通消费者只能取其有权的正式版本，不能因知道 ID 读历史草稿。Connector 对应 reading view 为 effective/editing。Admin 投影遵守 A21/A22/A23/A26：A21 默认 editing/current，仅 Connector 详情可显式 `effective`，DTO 省略 `published_version_id`；A22 按精确 `version_id` 读取并校验归属，Connector 400 `unsupported_type`；A23 缺省 current 并标实际 `version_id`；A26 重传带 `expected_edit_revision`（§4.2）。
 
 市场名称、摘要、标签、搜索、排序名称、Team `member_count` 均从来源 own selected published snapshot 投影（Team 的成员数量来自自身边集合，不随成员 Expert 发新版变化）；评分、展示位、计数等运营字段来自当前元数据。筛选和分页必须使用同一投影，不能先按 current 搜索再替换响应内容。依赖内容只由最新解析服务提供，禁止每个 handler 自行拼装版本语义或补 latest。
 
@@ -208,6 +220,8 @@ A01 `GET /market/api/v1/plugins` 已同时被 Web 与 Buddy 使用；不新增"�
 判定从来源 `published_version_id` 的快照 refs 出发，按 `target_plugin_id` 解析目标当前正式发布版；**不使用 refs 里的 `target_version_id`，不读目标 current，也不回退旧版本**。Team 的下一跳解析成员 Expert 当前正式发布版，再解析该 Expert 当前 published 快照里的 Skill/Connector。整条链在同一数据库一致性快照内解析，避免逐节点漂移。Connector 按 ID 判定当前有效状态，无业务 version_id。没有依赖的合法图可用；来源应有版本或 refs 缺失属于完整性错误，数据库失败属于服务错误，不将二者解释为"零依赖"或 available。
 
 实现落点为 `internal/repository/plugin/read.go::buildListQuery/List`，共享 from/where 中加入按目标当前发布版递归判定的可用性条件，先筛选再 COUNT 与排序/分页，不能 Service/前端事后丢卡。`history.go::ListPlacementCategories` 仅 `plugin_count`、`tags.go::ListTags` 公共集合/统计复用同一来源资格及发布投影；分类仍返回原 active 配置行，不新增隐藏零计数类别规则。只读 metadata/refs，不逐卡 A34 或读文件；MP-02 拥有判定，MP-01 接入 A01 底座。
+
+该 SQL 谓词不是第二套 latest 实现：它必须与 §2.1 的 resolver 共享同一语义核心（同 owner、同可用定义、同 Team 一跳展开），由共享规则生成或对 resolver 做等价测试；除这一处下推外，禁止其他 handler/service 手写 latest 或按 ID 逐卡解析。A01 的 COUNT、分页、分类 `plugin_count` 与公共 tags 必须使用同一谓词，避免"列表显示但 A34 失败"。
 
 可执行完整性前置：对既有根资格范围内的来源版本及 Team 解析到的成员版本，在同一数据库一致性快照内验证 `relations_json` 为数组；用 `JSON_TABLE` 投影 `relation_id`/`type`/目标 ID/`sort_order` 与 refs 双向反连接校验（`target_version_id` 可比对但**不参与**可用性判定），并比较数量。合法 `[]` 与零 refs 不同于漏索引；版本缺失、非数组、缺/多 refs 或等数量错目标/类型均 500 `relation_index_inconsistent`，不得被 NOT EXISTS 可用性过滤吞掉。目标 Plugin 缺失但快照/refs 一致则是普通依赖不可用。COUNT、数据页及分类/tags 共享此 metadata 前置，不读文件。
 
@@ -247,7 +261,7 @@ type DependencyAvailability = {
 
 Web 使用 code 映射既有 i18n，不由服务端返回完整句子/HTML。受影响行新增独立"依赖异常"标记与支持 hover/键盘 focus 的 Tooltip，保留既有 `listing_state/display_status` 审核标记与操作入口。发布根可显示"Skill「X」已下架，当前发布版本暂不在市场展示"；间接可显示"成员专家「A」依赖的MCP「B」已下架，专家团暂不在市场展示"；匿名显示"存在已失效或不可访问的依赖，请检查依赖配置"。editing 根只提示"草稿依赖异常"，不宣称"已从市场隐藏"。Web 不扇出依赖/A34 请求生成提示。
 
-MP-01 是 A01 唯一 owner，交付共享 DTO、按 mode 分流与列表投影底座；MP-02 `extends_api_ids` 增加 A01，负责最新解析 predicate、诊断计算及 reason 授权；CL-02 负责 Web"我的发布-全部"及专家/专家团 tab 的类型、映射和 tips，CL-03 仅消费公共过滤；REL-01 验证端到端行为。8 issue 硬依赖不变，无新接口、生命周期或前端逐依赖检查要求。
+MP-01 是 A01 唯一 owner，只交付 `DependencyAvailability`/`DependencyTarget`/`DependencyReason` 的 Go 类型与序列化槽位、按 mode 分流及列表投影底座，**不得填充或伪造 `status/reasons/target/via`**；MP-02 `extends_api_ids` 增加 A01，负责最新解析 predicate、`status/reasons/target/via` 计算及 reason 授权（`available` 时 `reasons=[]`）；CL-02 负责 Web"我的发布-全部"及专家/专家团 tab 的类型、映射和 tips，CL-03 仅消费公共过滤；REL-01 验证端到端行为。8 issue 硬依赖不变，无新接口、生命周期或前端逐依赖检查要求。
 
 ### 6.3 A03 轻量版本图与 A34 完整内容
 
@@ -259,9 +273,9 @@ A03 `detail_graph` 保留轻量摘要图展示，不提供全部正文或支持�
 
 1. 服务端在同一个短数据库一致性快照中选择根已发布快照或有效 Connector，**按 B 递归解析全部最新成员 Expert、最新 Skill 及按 ID 引用的有效 Connector**，逐节点沿用既有访问/上下架及历史受众检查；根、依赖 refs 和 Connector 完整 effective 行复制到内存，核对投影与完整有效内容摘要后结束事务，再读不可变 OSS 文件。不先记录旧 effective_revision 再晚读被覆盖的新内容，不在数据库锁内做对象存储 I/O。
 2. Graph 按"资源＋解析版本/有效修订"去重，Connector 以有效修订区分；**同一次响应中同一依赖资源只会出现一个最新解析版本**（不同根版本分别请求），边及节点保留准确来源/目标身份，不承诺运行时共存。`DistributionBundle` 保留 `schema_version/root/graph/assets/bundle_digest`；assets 对每个 graph `node_key` 恰好一项。
-3. 每项以 `files:[{path,mime_type,content,content_hash}]` 内联全部 UTF-8 原始文件；Expert/Team 仅自身 AGENTS.md，Skill 为 SKILL.md 及全部支持文件，路径/字节/hash 匹配快照清单。Connector 的 files 固定为空数组，仅在 `mcp_config` 中给对应有效修订的完整公开声明/Secret 占位符；不返回原始凭据或内部对象 key。`effective_digest` 覆盖完整有效行，不能要求客户端仅对 `mcp_config` 重算该摘要。
-4. 完整内容、映射和摘要校验全部成功才返回 200；缺节点、文件、权限或摘要异常整体失败，不删边/跳文件后 200，不分页/截断。图/文件预算按 1500 节点、2000 边、16MiB 完整 JSON、单文本 1MiB 等既定上限；`budget_exceeded` 为 413，文件完整性错误为 500，权限使用既有安全错误。只支持既有 UTF-8 文本能力，不新增二进制或 Secret 能力。
-5. 响应 `Cache-Control: no-store`；`bundle_digest` 随解析结果变化（见 §1.2），不承诺同一 Expert/Team 版本永久同一 digest。Buddy 对一次完整 bundle 校验通过后才允许本地副作用，生产路径删除 `marketplace-client.ts` 的按 ID 扇出和 `marketplace-expert-recruit-service.ts` 的 ID-only BFS，不能再以 detail、versions、skill_md、download 或 files 请求补齐专家依赖。CL-03 的 Expert/Team 准备及 Skill/Connector 本地入口使用单 A34；CL-02 完整内容界面/CLI 查询也使用 A34，图展示仍可用 A03。
+3. 每项以 `files:[{path,mime_type,content,content_hash}]` 内联全部 UTF-8 原始文件；Expert/Team 仅自身 AGENTS.md，Skill 为 SKILL.md 及全部支持文件，路径/字节/hash 匹配快照清单。Connector 的 files 固定为空数组，仅在 `mcp_config` 中给对应有效修订的完整公开声明/Secret 占位符；不返回原始凭据或内部对象 key。`effective_digest` 覆盖完整有效行（§3.2），不能要求客户端仅对 `mcp_config` 重算该摘要。
+4. 完整内容、映射和摘要校验全部成功才返回 200；缺节点、文件、权限或摘要异常整体失败，不删边/跳文件后 200，不分页/截断。错误矩阵固定：路径/类型/二进制 400（既有 `unsupported_binary`/`incompatible_skill_path` 等 reason），根或目标不可见 404，最新依赖未发布/下架/删除/状态不合法 409 `dependency_unavailable`/`dependency_changed`，预算 413 `budget_exceeded`，文件/索引完整性 500（`artifact_integrity`/`relation_index_inconsistent`）；权限使用既有安全错误。图/文件预算按 1500 节点、2000 边、16MiB 完整 JSON、单文本 1MiB 等既定上限。只支持既有 UTF-8 文本能力，不新增二进制或 Secret 能力。
+5. 响应 `Cache-Control: no-store`，不建立会话/跨请求解析或 bundle 缓存；刷新/切换 view 必须重新 GET，不能复用旧 `bundle_digest` 或解析结果。`bundle_digest` 随解析结果变化（见 §1.2），不承诺同一 Expert/Team 版本永久同一 digest。Buddy 对一次完整 bundle 校验通过后才允许本地副作用，生产路径删除 `marketplace-client.ts` 的按 ID 扇出和 `marketplace-expert-recruit-service.ts` 的 ID-only BFS，不能再以 detail、versions、skill_md、download 或 files 请求补齐专家依赖。CL-03 的 Expert/Team 准备及 Skill/Connector 本地入口使用单 A34；CL-02 完整内容界面/CLI 查询也使用 A34，图展示仍可用 A03。
 
 A34 返回市场原始内容，不生成 `installation_name`、不改写 SKILL.md/frontmatter、不产安装副本、不等待任何候选命名；"最新"是模型而不是失败回退，所以既不补 latest 也不回退旧版。读取不调用/查询 Fleet，不创建安装记录/资源，不修改发布状态；不是新的权限、生命周期或远端安装未知结果替代路径，不增加 Fleet 独立 Skill 安装 API，不承诺撤销已分发字节。A34 读取成功不代表 Fleet 安装成功或 Daemon 共存已支持。
 
@@ -288,20 +302,23 @@ F01 适配只作用于安装请求：无 Connector 的 Expert 省略 `mcp_config
 ### 7.2 幂等与安全重试
 
 1. 客户端每次明确安装意图生成一个 `Idempotency-Key`；网络故障重试复用。唯一域为 caller+workspace+key，Space 属于输入而非另一套远端 key 空间。Fleet key 固定使用 `attempt_id`，避免与直接 Fleet 客户端 key 冲突。
-2. 先查已有 attempt。先核对 caller/Space/Workspace 权限及 `intent_digest`（root、Space、Workspace、runtime、resource_name 的统一非 Secret 意图）；已知 SUCCEEDED 优先回放验证过的本地结果，不要求原 Secret 或根仍上架。若本次显式提供 custom_env 则仍核对完整 `input_hmac`。其他状态必须核对含 custom_env 的完整 `input_hmac` 并读取原 plan；不存在才构建 plan 并原子抢占，竞争失败者读取胜出记录。
-3. 首次构建 plan 时冻结当次解析结果：根版本、完整依赖图、Connector effective 内容、物化字节、市场原名、runtime 和 bindings。**同 key 重试只重放该冻结 plan**，不重新解析、不重选版本、不改出站请求。
-4. `PREPARED → DISPATCHING → SUCCEEDED/FAILED/UNKNOWN`，用行 CAS 和发送租约控制并发。租约到期只能继续原 attempt；不得创建另一个尝试或刷新安全截止时间。
-5. 发 Fleet 前按原 plan 重验权限/资格，使用本次重新提供且 HMAC 相同的 custom_env；不重读新 Connector、根发布版本或变换规则。首次可能发送前持久化请求 HMAC 和 `retry_until`，不持 MySQL 锁等待网络。
+2. 先查已有 attempt。先核对 caller/Space/Workspace 权限及 `intent_digest`（root、Space、Workspace、runtime、resource_name 的统一非 Secret 意图；**不含解析出的根/依赖版本**）；已知 SUCCEEDED 优先回放验证过的本地结果，不要求原 Secret 或根仍上架。若本次显式提供 custom_env 则仍核对完整 `input_hmac`。其他可重试状态（`PREPARED` 或窗口内 `UNKNOWN`）必须核对含 custom_env 的完整 `input_hmac`（同样不含解析版本）并读取原 plan；`FAILED` 不自动重试，`EXPIRED` 拒绝；不存在才构建 plan 并原子抢占，竞争失败者读取胜出记录。
+3. 首次构建 plan 时冻结当次解析结果：根版本、完整依赖图、Connector effective 内容、物化字节、市场原名、runtime 和 bindings。**同 key 重试只重放该冻结 plan**，不重新解析、不重选版本、不改出站请求。解析出的版本只属于 plan，不是输入身份。
+4. `PREPARED → DISPATCHING → SUCCEEDED/FAILED/UNKNOWN`，超窗派生 `EXPIRED`（或持久化同义状态），用行 CAS 和发送租约控制并发。只有 lease owner 才能 dispatch；`DISPATCHING` 租约到期而结果不可判定 → `UNKNOWN`，不得创建另一个尝试或刷新安全截止时间；晚到成功用 CAS 写入，不能覆盖 UNKNOWN 后丢失证据。
+5. 发 Fleet 前按原 plan 重验权限/资格，使用本次重新提供且 HMAC 相同的 custom_env；不重读新 Connector 或根发布版本。首次可能发送前持久化请求 HMAC 和 `retry_until`，不持 MySQL 锁等待网络。
 6. 网络超时、断连或不可判定响应进入 UNKNOWN，向调用者明确返回结果未知。窗口内且能重建原完整请求时，只能向现有 Capability POST 重发同 `fleet_key`/同请求，由 Fleet 现有幂等记录回放原结果或仲裁仍在途的请求。不查询远端回执，不根据资源名称猜成功或失败。
 7. 一旦出现 UNKNOWN，后续单次 4xx、校验拒绝或缺少本地结果不能证明此前未提交，保留未知证据。只有明确无提交且没有先前不确定性的拒绝可记 FAILED；已收到并验证成功的本地结果可直接回放，但不能据此推断其他未知结果。
 8. `retry_until` 从首次可能发送保守计时，最多 24h 且不能超过目标 Fleet 现有保证。到期由 Marketplace 及客户端拒绝自动 POST；不修改 Fleet 过期 key 可重占的既有行为。原参数/运行时凭据无法重建时也停止重发，只提示未知并人工核对。客户端重启不承诺仅凭 key 或无凭据自动恢复。
-9. 上游根、Skill、成员 Expert 发布新版或 Connector 正常产生新 effective，不阻断原 key 重试，也不触发重新解析；继续首次冻结 plan。本次显式安装输入变化返回 409 `idempotency_input_mismatch`。原 plan 节点下架/删除、权限失效等资格变化按原安全检查拒绝且保留 UNKNOWN；不能据此假定先前未提交。想使用最新内容时由用户发起新 key 新安装，旧未知结果须先核对。
+9. 上游根、Skill、成员 Expert 发布新版或 Connector 正常产生新 effective，不阻断原 key 重试，也不触发重新解析；继续首次冻结 plan。**解析版本变化不属于显式输入变化**；只有本次显式安装输入（root/Workspace/runtime/resource_name/custom_env 等）变化才返回 409 `idempotency_input_mismatch`。原 plan 节点下架/删除、权限失效等资格变化按原安全检查拒绝（409 `dependency_changed`/既有权限错误）且保留 UNKNOWN；不能据此假定先前未提交。想使用最新内容时由用户发起新 key 新安装，旧未知结果须先核对。
 10. 原 plan 缺失、输入 HMAC 不匹配均明确失败，不补当前内容，不换 key，不切旧执行器。Marketplace 本地出站 HMAC 不与 Fleet 规范化 SHA-256 混比；不要求新增远端摘要或查询协议。
 11. 仅首次 SUCCEEDED 转换增加计数；同键重放返回同资源 ID 而不重复计数。不保存 Token/custom_env 原文，不承诺跨窗口远端去重或长期结果恢复。
+12. attempt 表从旧 `(space_id,caller_uid,workspace_id,key_digest)` 主键及 `adapter_version`/`completed` 增量迁移为 `attempt_id` 主键与 `(caller_id,workspace_id,client_key_hash)` 唯一域，新增 state/lease/plan/HMAC/retry_until；旧 completed 行只有已验证成功结果才映射 `succeeded`，否则 `unknown`/人工，不自动重试。同名不同内容由 Fleet 现有冲突映射为 409 `same_install_identity_different_content`，不新增预检查询。
 
 ### 7.3 双入口和 Fleet 既有边界
 
-`POST /plugins/{plugin_id}/installations`（A31）和 `POST /plugins/install`（A32）保留外部请求/响应适配，内部只调用同一 `InstallCoordinator`；A32 保留 URL 但不保留旧行为：新增必填幂等头、用户身份、Workspace UUID，拒绝 Bot，与新入口同安全边界，不是 fallback。两个入口归一化后同一唯一域，不能同一 key 换 URL 创建另一 attempt。市场旧 adapter 及专用 provision/rollback 调用退出；**删除市场 legacy create/bind/delete 补偿**，不允许两套引擎。`/experts/{expert_id}/install`、`/squads/{squad_id}/install` 属于独立非市场模型，不在本期新增 Plugin 映射或改协议；`service/expert` 中仍被这些独立入口调用的共享代码保留；只删除市场调用链已无其他使用者的旧实现，不要求整个目录归零。
+`POST /plugins/{plugin_id}/installations`（A31）和 `POST /plugins/install`（A32）保留外部请求/响应适配，内部只调用同一 `InstallCoordinator`；A31/A32 都必须有单个 `X-Workspace-Id` UUID、必填 `Idempotency-Key`、用户身份并拒绝 Bot。A32 保留 URL 但 body `workspace_id` 必须等于 header，否则 400；不保留 legacy 行为，不是 fallback。两个入口归一化后同一唯一域，不能同一 key 换 URL 创建另一 attempt。市场旧 adapter 及专用 provision/rollback 调用退出；**删除市场 legacy create/bind/delete 补偿**，不允许两套引擎。`/experts/{expert_id}/install`、`/squads/{squad_id}/install` 属于独立非市场模型，不在本期新增 Plugin 映射或改协议；`service/expert` 中仍被这些独立入口调用的共享代码保留；只删除市场调用链已无其他使用者的旧实现，不要求整个目录归零。
+
+**#128 安装侧清理（MP-03 owner）：** 删除 `pinnedInstallation`/`installPinnedLegacy`（`pinned_install.go`、`install.go`、`capability_install.go`）、`SkillInstallAdapterVersion="mk1"`/`PreparePinnedSkills`（`install_primitives.go`）、`adapter_version`/`transform_variant` 及旧 attempt 字段/查询（`install_attempt.go`、`migrations/sql`）；A31/A32 在 flag on/off 下都必须只进 `InstallCoordinator`，验收断言旧符号/字段为 0、旧 pinned/mk1 路径不可达。`mk1` 别名、`SKILL.md`/frontmatter 改写一律随旧代码删除，不保留灰度兜底。
 
 Fleet 的 Capability POST 主体、鉴权、事务及现有幂等窗口全部保持；本期不新增 Marketplace/Fleet 安装结果查询，不改 Fleet 表、action、cleanup、保留期限或过期重占。完整请求一致的窗口内 POST 回放已满足本轮确认的网络故障安全重试；无凭据恢复和跨窗口查询不在范围内。不增加市场 Plugin/Version ID 到 Fleet Definition，不做 Fleet/Daemon 改造。
 
@@ -309,7 +326,9 @@ Fleet 的 Capability POST 主体、鉴权、事务及现有幂等窗口全部保
 
 **已确认迁移结果：**旧市场资产内嵌的 Skill 和 Expert 都必须成为独立、市场可见的资产；Team 内嵌 Expert 及这些 Expert 内嵌的 Skill 须递归拆分。目标沿用所属市场来源的 owner 及既定 system/Space 受众，按现有发布/审核规则完成后，在 Web/Buddy 对应市场列表独立展示、可被合法来源引用；不因旧 embedded 身份继续隐藏，不创建 private 依赖来替代此结果。迁移生成**引用式**资源：Expert→Skill、Team→Expert 只存目标 ID，不写入权威 pin；旧 pin 仅作为历史/审计保留，不再作为公共/安装解析依据。原有下架/删除及公共依赖过滤规则不变，纯本地组合不迁移。本确认不代替具体迁移计划和生产执行授权。
 
-生产路径为 **`marketplace-stock-migration` CLI + 离线授权**；本期**不做 A29/A30 HTTP**，不在 Market 服务内新增迁移端点。CLI 复用同一领域转换服务与 plan schema，不另写权限旁路，也不是 `/_batch`（不承诺多个目标/来源一次大事务）。
+生产路径为 **`marketplace-stock-migration` CLI + 离线授权**（按 00 §5 在现有 CLI 上演进，命令名/子命令以实现时确认为准）；本期**不做 A29/A30 HTTP**，不在 Market 服务内新增迁移端点。CLI 复用同一领域转换服务与 plan schema，不另写权限旁路，也不是 `/_batch`（不承诺多个目标/来源一次大事务）。
+
+**CLI 契约（MP-04）：** CLI 不使用 HTTP 状态码；`plan_stale`/`authorization_invalid` 以 CLI reason + 非零退出表达，已有 run 保持 `blocked`，不映射为 HTTP 409。apply/resume 没有幂等键参数；run 由 `(source_scope, source_identity, plan_digest, root)` 仲裁，同一冻结计划重跑恢复原 run，不重复创建 Version/审核。冻结 plan（或其不可变对象 key）、run 状态、map、authorization→batch/run 绑定按 §3.1 持久化，`resume --run-id` 才能执行。
 
 ### 8.1 两次 preview 与冻结计划
 
@@ -321,20 +340,23 @@ Fleet 的 Capability POST 主体、鉴权、事务及现有幂等窗口全部保
 ### 8.2 写入、审核与完成条件
 
 - create/reuse/update_source：root 用 `update_source` 保持原 Plugin ID；子节点 create 或明确 reuse（精确目标 ID）；不做自动 latest 猜测，不补 latest。
-- 映射来源身份不可为空：数据库 `source_kind=plugin_version`、`source_identity=plugin_id@version_id`；ZIP `source_kind=zip`、`source_identity=ZIP 原始字节 SHA-256`。`source_scope` 为批准计划根 owner/Space/visibility 的 canonical 摘要，`plan_digest` 另外绑定所有节点的完整映射与范围。不同幂等 key 并发执行同一批准计划也必须原子争用该映射身份，失败者回读胜出映射，不能重复建资源。
+- 映射来源身份不可为空：数据库 `source_kind=plugin_version`、`source_identity=plugin_id@version_id`；ZIP `source_kind=zip`、`source_identity=ZIP 原始字节 SHA-256`。`source_scope` 为批准计划根 owner/Space/visibility 的 canonical 摘要，`plan_digest` 另外绑定所有节点的完整映射与范围。`source_digest` 统一映射为 02 的 `input_digest`（数据库覆盖源图完整快照、文件原字节摘要及归属；ZIP 为原字节 SHA-256），不定义第二套摘要。同一批准计划被并发 apply 时，原子争用 `(source_scope,source_identity,plan_digest,root)` 的 root 映射身份，失败者回读胜出 run/map，不能重复建资源；不定义 CLI 幂等键参数。
 - 按 Skill/Connector → Expert → Team 拓扑转换，默认保留原身份/范围；每个新目标及映射在同一事务记录；Space 新资源按原审核流程发布，未批准时 run=`waiting_review`，来源不切换。CLI 生成的新版本走现有发布/审核，**默认自动审核可自动批准，人工模式则 `waiting_review`**；不直接插 release 绕过审核。run 状态仅 `completed|waiting_review|blocked`。
+- Connector：system 来源按现有 Admin 直接生效路径写入并同步 effective，不进入审核；Tenant 来源走审核，批准后才产生 effective。冻结计划/run 记录 preview 时的 `target_effective_revision`/`target_effective_digest` 作为批准观察值；apply 时漂移返回 `plan_stale`，不写成关系 pin，也不改报 `dependency_changed`。
 - 每个来源最终切换一次事务：CAS 原版本/`edit_revision` → 按 B 检查已发布目标及可用图 → 写新的引用式草稿或发布/审核版本 → 写映射/审计。`source_commit_json` 记录本次来源切换的输出版本/修订/审核 ID。原历史不可变、不伪造旧 pins，embedded 旧记录保留证据并不可再分发，不做共享目标级联删除。
-- apply 同 key 同冻结计划先关联原 run，再恢复未提交步骤；root map 的 reserved 记录仲裁不同 key 的同一计划，目标 ID 暂可 null，每个真实目标创建与 map 更新同事务提交。后续新 current 不被覆盖；原冻结审核正常批准时可完成；拒绝/取消阻断，不自动重提。非终态 receipt 只关联 run，不永久缓存 `waiting_review`/`blocked`；completed 才固定终态与回放期。
+- apply 同 run 同冻结计划先关联原 run，再恢复未提交步骤；root map 的 reserved 记录仲裁同一计划，目标 ID 暂可 null，每个真实目标创建与 map 更新同事务提交。后续新 current 不被覆盖；原冻结审核正常批准时可完成；拒绝/取消阻断，不自动重提。非终态 receipt 只关联 run，不永久缓存 `waiting_review`/`blocked`；completed 才固定终态与回放期。
 - 独立可见：迁移后的 Skill/Expert 必须在对应市场独立可发现；只有全部节点发布/列表资格就绪才 `completed`。
+
+**#128 迁移侧清理（MP-04 owner）：** 把 `cmd/marketplace-stock-migration`、`internal/backfill/stockmigration`、`plugin_stock_migration_batches/roots` 纳入 owner，按 00 §5 在现有 `marketplace-stock-migration` 上演进；删除 `--rollback` 指针回滚、直接 `INSERT plugin_version_releases`、`--g4...` 自证批准和固定 pin。旧 `plugin-backfill` 按旧入口退役（若最终复用为生产入口，须另记决策并删除其旧 phase/Runner），不得成为本次生产迁移的旁路；`plugin_stock_migration_batches/roots` 由 MP-04 决定保留或迁移，但不得成为绕过 run/map 的第二套账本。若最终替换 CLI，须另记决策并同时退役旧 binary。`scripts/pinned-release-readiness.sql` 按 `target_version_id` 遍历已不成立，必须重写为 latest 解析或仅结构检查（只读、不把审计值当权威）。REL-01 验证 `marketplace-stock-migration` 的旧危险模式与 `plugin-backfill` 两个旧入口都不可写。
 
 ### 8.3 切换与数据安全回滚
 
-切换条件：范围内每个资源有确定发布身份、完整文件、合法最新解析图及已确认权限；新客户端齐备；既有 Fleet 安全重试与常规 Daemon 安装验证通过；共存场景明确不做。先在部署层隔离新 Marketplace 副本，只开放健康检查及受控验收流量，通过既有网关/负载均衡规则阻断生产读写，再冻结旧写入及相关后台任务，批准后逐步放通新链路。REL-01 负责部署清单和请求阻断证据；旧市场执行器在新改造完成后必须**不可达**（全入口阻断；flag 只作额外手段），不依赖当前源码未实现的业务开关，不要求 Fleet 改造。
+切换条件：范围内每个资源有确定发布身份、完整文件、合法最新解析图及已确认权限；新客户端齐备；既有 Fleet 安全重试与常规 Daemon 安装验证通过；共存场景明确不做。先在部署层隔离新 Marketplace 副本，只开放健康检查及受控验收流量，通过既有网关/负载均衡规则阻断生产读写，再冻结旧写入及相关后台任务，批准后逐步放通新链路。**门禁不能只看网关/网络：**必须撤销旧 `plugin-backfill` 与旧运维/旧模式使用的 DB 账号/DSN/权限，移除或 deny 旧 `plugin-backfill` 二进制；`marketplace-stock-migration` 的生产入口改用最小权限账号并撤销旧账号。枚举 A14–A19/placement 等全部入口，验证旧 `--all-spaces --apply`、`--rollback`、直接 release、`--g4...` 自证批准均不能创建/切换/写 release；记录命令、操作者、制品与拒绝证据。REL-01 负责部署清单和请求阻断证据；旧市场执行器在新改造完成后必须**不可达**（全入口阻断；flag 只作额外手段），不依赖当前源码未实现的业务开关，不要求 Fleet 改造。
 
 回滚必须数据安全，以部署层拒绝新增写入/发布/apply/安装、停止对应后台任务和隔离新副本为门禁：
 
 - 不删表、不删文件、不覆盖旧快照，不清理 batch/mapping/attempt/audit；
-- **不把 `current_version_id`/`published_version_id` 改回旧值**；需要停止新分发时用下架/部署隔离，不用指针回切；
+- **不把 `current_version_id`/`published_version_id` 改回旧值**；需要停止新分发时用下架/部署隔离，不用指针回切；不调用/恢复旧 `marketplace-stock-migration --rollback` 的指针回滚模式，演练必须断言该 flag/路径不存在；
 - 不恢复市场 legacy 执行器，不重新产生 embedded/inline；
 - 只部署能理解新模型的兼容二进制；内容恢复从完整历史生成**新发布版本**（forward-fix），走正常发布/审核；
 - 未决 attempt 保留并明确提示人工核对，不改写成"未执行的新尝试"。
@@ -344,27 +366,29 @@ Fleet 的 Capability POST 主体、鉴权、事务及现有幂等窗口全部保
 | 不变量 | 必须实际证明 |
 |---|---|
 | 草稿隔离 | 发布 v1→保存 v2→提交 v2→保存 v3→批准 v2；外部 v2、编辑 v3，内容/文件/关系/标签均正确；批准不回写 current |
-| B 最新解析传播 | S 发布 v2 后，引用它的 E 与 Team 在**下一次**公共列表/详情/A34/安装中自动使用 v2，E/Team **不需要**发新版本；旧 `target_version_id`（若存在）不被读取 |
+| B 最新解析传播 | S 发布 v2 后，引用它的 E 与 Team 在**下一次**公共列表/详情/A34/安装中自动使用 v2，E/Team **不需要**发新版本；旧 `target_version_id`（若存在）不被读取；A01 公共/A34 用 published、A01 mine 用 editing、A03 显式历史根、A13/A14 用提交版本，显式版本不回读 current |
 | Team 边稳定 | 成员 Expert 发新版只更新成员内容及其 Skill；Team 的 `member_key`/`role`/`is_leader`/`sort_order`、`member_count` 与会话顺序不变，无需 Team 新版本 |
 | 不回退 | 目标最新版下架/删除后，公共列表隐藏引用方、A34/安装整体失败；不静默用旧版本、不补 latest、不删边、不降级 |
-| 引用删除保护 | 草稿有效 live 边仍阻止删除；E published e1 引用 S、current e2 去掉 S 仍拒绝删除；published Team → Expert → Skill 的间接引用同样保护；共享 Skill/Expert 不因删除引用方被删；**没有**"曾发布即禁止删除"的总禁令（无 incoming 引用可删） |
+| 引用删除保护 | 草稿有效 live 边仍阻止删除；E published e1 引用 S、current e2 去掉 S 仍按 E 的 current `published_version_id` 保护 S；Team T→E 在 E 当前 published 引用 S 时保护 S，E 发布 e2 去掉 S 后 S 失去 T 保护，若无其他 live incoming/current published refs 即可删；历史 e1/审计 pin 永不作为保护依据；共享 Skill/Expert 不因删除引用方被删；**没有**"曾发布即禁止删除"的总禁令 |
+| refs/Connector 底座 | Expert→Skill、Team→Expert 省略 `target_version_id` 合法，显式值须属于目标且已 release，Connector 带值 400 `connector_version_forbidden`；CHECK/validator 放宽；存量 Connector 回填 revision 1 + digest，缺失 effective 行的旧 Connector 不可引用 |
 | 图版本身份 | A03 按 `plugin_id@解析版本`（Connector `plugin_id@effective_revision`）区分节点/边，不按名称或 plugin_id 合并版本；只给文件清单，不含正文 |
-| 公共依赖过滤 | 任一直接或间接依赖最新解析不可用 → Expert/Team 不在公共结果；COUNT/分页、分类 `plugin_count`、公共 tags 同口径；SQL 分页前过滤，无逐卡 A34/文件读取 |
-| mine 四字段与发布根 | mine/Admin 保留原非删除行与 total；已发布根异常而 current 草稿修复时仍诊断 `published`；从未发布才诊断 `editing` 并只提示"草稿依赖异常"；`target.version_id` 为本次解析最新版本 |
-| 原因授权 | 逐项可读才返 target/完整 via/精确版本；无权或无法确认的缺失只一条匿名 `dependency_unavailable`，不泄漏身份、数量或下架/删除差别；`view` 非法组合 400 `details.field=view` |
+| 公共依赖过滤 | 任一直接或间接依赖最新解析不可用 → Expert/Team 不在公共结果；COUNT/分页、分类 `plugin_count`、公共 tags 同口径；SQL 分页前过滤，且 SQL 谓词与 resolver 同语义核心/有等价测试，无逐卡 A34/文件读取 |
+| mine 四字段与发布根 | mine/Admin 保留原非删除行与 total；已发布根异常而 current 草稿修复时仍诊断 `published`；从未发布才诊断 `editing` 并只提示"草稿依赖异常"；`target.version_id` 为本次解析最新版本；MP-01 只定义 DTO 类型/序列化槽位，MP-02 才填 status/reasons/target/via |
+| 原因授权 | 逐项可读才返 target/完整 via/精确版本；无权或无法确认的缺失只把不可披露部分聚合为一条匿名 `dependency_unavailable`，不泄漏身份、数量或下架/删除差别；可见原因仍分别列出；`view` 非法组合 400 `details.field=view` |
 | A34 单请求完整读取 | 单 GET 返回本次最新解析整图与全部原始 UTF-8 文件；Expert/Team 仅自身 AGENTS.md，Skill 含 SKILL.md 及支持文件，Connector `files:[]` + 有效公开配置/占位符；每 `node_key` 恰一 asset；`bundle_digest` 随解析变化 |
-| A34 读取边界与失败 | Buddy/CL-02 仅一次 A34，无 BFS 或 detail/versions/skill_md/download/files 补齐；缺节点/文件/权限/摘要异常整体失败，超预算 413、完整性 500、权限沿安全错误；`no-store`；零 Fleet 调用/安装记录/发布变更；无 `installation_name`、无 frontmatter 改写 |
-| 审核 | 自动模式无人工步骤，解析→批准内部重试一次；人工模式审核窗口内观察值变化 409 `dependency_changed`；批准后依赖继续浮动；**Skill/Expert 发新版不要求重新审核引用方**；审核观察记录解析版本而非 pin |
-| 安装 | 同 key 只重放首次冻结 plan；显式安装输入变化返回 409；上游正常发新版仍重放原 plan；新 key 新安装取最新解析；`PREPARED/DISPATCHING/SUCCEEDED/FAILED/UNKNOWN` 与行 CAS 正确；只有首次 SUCCEEDED 计数；UNKNOWN 不被后续 4xx 洗白；旧 legacy create/bind/delete 不可达 |
+| A34 读取边界与失败 | Buddy/CL-02 仅一次 A34，无 BFS 或 detail/versions/skill_md/download/files 补齐；缺节点/文件/权限/摘要异常整体失败；错误矩阵 400 路径/类型/二进制、404 根/目标不可见、409 最新依赖不可用/状态不合法、413 预算、500 文件/索引完整性；`no-store` 且不跨请求缓存/复用旧 digest；零 Fleet 调用/安装记录/发布变更；无 `installation_name`、无 frontmatter 改写 |
+| 审核 | 自动模式无人工步骤，解析→批准内部重试一次；人工模式审核窗口内观察值变化 409 `dependency_changed`；批准后依赖继续浮动；**Skill/Expert 发新版不要求重新审核引用方**；审核观察用 `resolved_dependency_observations` + `connector_observations` 记录解析版本而非 pin；Admin 无 pending review |
+| 安装 | 同 key 只重放首次冻结 plan；显式安装输入变化返回 409；解析版本变化不算显式输入变化；上游正常发新版仍重放原 plan；新 key 新安装取最新解析；`PREPARED/DISPATCHING/SUCCEEDED/FAILED/UNKNOWN/EXPIRED` 与行 CAS 正确；只有 lease owner 可 dispatch，DISPATCHING 租约到期→UNKNOWN；只有首次 SUCCEEDED 计数；UNKNOWN 不被后续 4xx 洗白；旧 legacy create/bind/delete 不可达 |
 | 安装身份与 Fleet | 普通安装保留市场原名/原字节；同名不同内容 `same_install_identity_different_content` 失败，不生成 `mk1` 别名、不改写 frontmatter、不改目录名；无 `installation_name`；不改 Fleet/Daemon |
-| 权限与职责 | system 只引用 system；space 只引用 system/同 Space 的 space；同 owner private→private 允许；space/system 不得引用 private；跨 Space 禁止；Admin 可见不绕过；本地组合不生成市场资产 |
+| 权限与职责 | system 只引用 system；space 只引用 system/同 Space 的 space；private 可引用已发布 system、同 Space space、同 owner private；space/system 不得引用 private；跨 Space 禁止；Admin 可见不绕过；本地组合不生成市场资产 |
 | 文件 | 旧字节与摘要可重取；失败清理不删除其他版本/待审核/安装计划所需对象 |
-| 迁移 | CLI 两次 preview、冻结 `plan_digest`、apply 只认冻结计划；显式标签/映射/Connector 分组；run 状态 `completed` / `waiting_review` / `blocked`；停止/恢复可继续；数据安全回滚（不指针回切、不删行删文件、forward-fix 新版本）；迁移后各节点独立可见；**无 A29/A30 HTTP** |
+| 迁移 | CLI 两次 preview、冻结 `plan_digest`、apply 只认冻结计划；`plan_stale`/`authorization_invalid` + 非零退出/`blocked`，不用 HTTP 409；无幂等键参数，run 由 `(source_scope,source_identity,plan_digest,root)` 仲裁；显式标签/映射/Connector 分组；run 状态 `completed` / `waiting_review` / `blocked`；停止/恢复可继续；Connector reuse 漂移 `plan_stale`；数据安全回滚（不指针回切、不删行删文件、forward-fix 新版本）；迁移后各节点独立可见；**无 A29/A30 HTTP** |
+| #128 清理与门禁 | `pinnedInstallation`/`installPinnedLegacy`/`SkillInstallAdapterVersion`/`PreparePinnedSkills`/`adapter_version`/`transform_variant` 删除；A31/A32 在 flag on/off 都只进 `InstallCoordinator`；旧 `--rollback`/直接 release/`--g4...`/固定 pin 删除，`scripts/pinned-release-readiness.sql` 改为 latest 解析或仅结构检查；DB 账号/DSN/权限撤销 + 旧二进制移除/deny，旧入口不可写 |
 | 真实运行 | 用未修改 Fleet/Daemon 验证引用式 Team 的文件、成员绑定、MCP 和技能发现；不声称同名多版本共存；旧市场执行器在全入口不可达 |
 
-主要 Marketplace 文件：`internal/model/plugin.go`；`internal/repository/plugin/{write,read,history,review,listing,references}.go`；`internal/service/plugin/{service,admin,container,review,listing,install,capability_*}.go`；新增 `internal/service/plugin/latest_resolution.go`（最新发布解析）与依赖策略；handler/plugin；`migrations/sql`。Fleet 现有安装实现仅用于核验协议和联调，不修改源码/SQL。客户端落点和操作级验收见对应 issue。
+主要 Marketplace 文件：`internal/model/plugin.go`、`internal/model/plugin_snapshot.go`；`internal/repository/plugin/{write,read,history,review,listing,references,install_attempt}.go`；`internal/service/plugin/{service,admin,container,review,listing,install,install_attempt,pinned_install,install_primitives,capability_*}.go`（其中 pinned/mk1/transform_variant 路径按 §7.3 删除）；新增 `internal/service/plugin/latest_resolution.go`（最新发布解析）与依赖策略；`cmd/marketplace-stock-migration`、`cmd/plugin-backfill`、`internal/backfill/stockmigration` 退役/演进见 §8.2；`scripts/pinned-release-readiness.sql` 重写；handler/plugin；`migrations/sql`。Fleet 现有安装实现仅用于核验协议和联调，不修改源码/SQL。客户端落点和操作级验收见对应 issue。
 
-**同步状态（2026-10-26）：** 02 API 与 issues 已按 B/00 重写；Expert/Skill 解析观察字段已由 02 §2.3 定义为 `resolved_dependency_observations`；A25 schema2 的容器 `version_id` 已定义为可选审计值（提供时须属于目标/已发布，不参与解析；与最新解析不同不报错）；A34 示例 `bundle_digest` 只作示例，不作为回归基线。实现前仍需确认的实现细节（不改变 B/00）：① 删除保护间接展开固定取成员 Expert 当前正式发布版，不扫描全部历史发布版扩大保护；② Team 浮动成员名称冲突按解析后名称判定并复用 `team_member_name_conflict`；③ A34/安装的动态解析缓存只在单次请求内有效，不跨请求。以上均不改变 00 的 B 模型。
+**同步状态（2026-10-26）：** 00/01 已并入本轮评审修正：D1 当前 `published_version_id` + Team 一跳间接链、移除 `rejectPublishedMutation`；refs `target_version_id` 可空/Connector NULL 及 CHECK/validator owner；Connector effective 回填与完整行 `effective_digest`；解析器根选择与 A01 SQL 同语义核心；A01 DTO 的 MP-01/MP-02 边界；D9 输入身份不含解析版本、EXPIRED/租约状态；#128 安装/迁移侧清理；CLI `plan_stale`/`authorization_invalid`、无幂等键、resume/frozen plan 存储；A34 400/404/409/413/500 与 no-store/不跨请求缓存；D6 引用矩阵；D8 relations 范围。02 API 与 issues 已按 B/00 重写；Expert/Skill 解析观察字段已由 02 §2.3 定义为 `resolved_dependency_observations`；A25 schema2 的容器 `version_id` 已定义为可选审计值（提供时须属于目标/已发布，不参与解析；与最新解析不同不报错）；A34 示例 `bundle_digest` 只作示例，不作为回归基线。实现前仍需确认的实现细节（不改变 B/00）：① 生产 CLI 命令名/子命令以实现时确认为准（按 00 §5 以 `marketplace-stock-migration` 演进；若替换须另记决策）；② Team 浮动成员名称冲突按解析后名称判定并复用 `team_member_name_conflict`；③ A34/安装的动态解析缓存只在单次请求内有效，不跨请求。以上均不改变 00 的 B 模型。
 
 ## 评审修订实现约束
 

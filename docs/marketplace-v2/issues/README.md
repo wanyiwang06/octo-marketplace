@@ -14,11 +14,11 @@
 |---|---|---|---|
 | #124 `52e4d91` | 已合入 | 版本/发布底座：快照、release/published、SemVer | 保留底座；补 `edit_revision` CAS、relations 必填、Connector effective、读投影；不补 A09/`restored_from_version_id`。 |
 | #125 `c9d2a84` | 已合入 | 引用/审核/删除保护骨架 | 保留 refs/rereview 骨架；改为浮动最新解析（`target_version_id` 仅审计）、删除保护并集（去掉曾发布总禁令）、同 owner private→private 允许、Connector observations。 |
-| #126 `e7ffc79` | 开放 | 固定版本安装、盘点/迁移 CLI | **不按现状合并**：A31/A32 两套执行器、重试重读 live、指针回滚、`mk1` 改名、迁移无冻结 `plan_digest`。按 MP-03/MP-04 重做。 |
+| #126 `e7ffc79` | 已关闭，未合入 | 固定版本安装/盘点/迁移 CLI | 不作为基线；其内容由 #128 替代，不重复引入。 |
 | #127 `016baef` | 开放 | 公共列表按依赖过滤（SQL 前置/COUNT/facets） | **不按现状合并**：`dependency_issues` 旧 DTO、只诊断 pin、无 `view`/四字段/匿名聚合/editing 根。保留 SQL 前置思路，按 D4/B 重做。 |
-| #128 `3467a39` | 核验时开放，#126 替代候选 | inline 负校验、锁前文件冻结、readiness SQL、过期回执说明 | 保留这些修复；MP-02 改 pin/Connector 和权限，MP-03 替换 legacy/重解析 attempt/mk1，MP-04 去掉指针回滚并补冻结授权计划，REL-01 复用 readiness/回执手册并实测。 |
+| #128 `3467a39` | **已合入 main `eec5223`** | inline 负校验、锁前文件冻结、readiness SQL、过期回执说明 | 保留这些修复；但 main 仍含 `mk1`/pinned refs CHECK/指针回滚/直接 release 等需清理行为：MP-02 改 pin/Connector 和权限，MP-03 替换 legacy/重解析 attempt/mk1，MP-04 去掉指针回滚并补冻结授权计划，REL-01 复用/改写 readiness 与回执手册并实测。 |
 
-以上是 2026-10-26 核验快照，不是实时状态；实施前复核 head/merge。#126/#128 按替代关系选基线，禁止重复引入。已有 release/refs/attempt 表复用，plan 的 owns_new_tables 保留原 schema 字段名、表示本方案表职责，DDL 只提交实际缺失增量。文档五组修订完成，代码与运行验收尚未完成。
+当前 remote 基线为 `origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）；本地 checkout 可能落后。`#126/#128` 是替代关系，不是同时合入。`mk1`/指针回滚只在 main 既有代码中，必须显式移除，不能当新能力保留。
 
 ## 1. 交付切片与硬依赖
 
@@ -30,7 +30,7 @@
 | MP-02 | [浮动引用、最新解析与审核治理](02-dependency-governance.md) | MP-01 | marketplace | 唯一最新解析服务/引用写入与矩阵/审核观察/live∪published∪Team→最新发布 Expert 间接保护/容器/候选与影响；A01 公共 SQL 过滤、COUNT/facets、mine 四字段安全诊断 |
 | MP-03 | [原子安装、A34 与安全重试](03-installation-fleet.md) | MP-02 | marketplace（联调依赖现有 Fleet） | A31/A32/A34 唯一端点 owner；A34 单 GET 最新完整内容/一个安装引擎/同 key 原 plan/新 key 最新/状态机与 UNKNOWN；同名冲突失败 |
 | MP-04 | [CLI 转换与数据安全回滚](04-migration.md) | MP-02 | marketplace | CLI 两次 preview/冻结 `plan_digest`/apply 只认冻结计划/映射/waiting_review/数据安全回滚；不调用 Fleet |
-| CL-01 | [Admin 接入](05-admin.md) | MP-02 | admin | schema2 ZIP-only/A25 Key+CAS+`resolved[]`/只读解析预览/effective 读取；沿用现有发布审核动作 |
+| CL-01 | [Admin 接入](05-admin.md) | MP-02 | admin（外部依赖） | schema2 ZIP-only/A25 Key+CAS+`resolved[]`/A03/A10 最新解析 + A22 精确读取/effective 读取；**Admin 无资产审核，create/update/reupload 直接生效；仅 Tenant 审核**；readiness SQL 按 B 改写或仅结构检查 |
 | CL-02 | [Web 与 CLI 接入](06-web-cli.md) | MP-02、MP-03 | web、cli | 显式引用+CAS/审核/版本读取/A34 一次最新完整内容/CLI 查询/mine 四字段标记与匿名 Tooltip/同 key 原 plan、新 key 新安装 |
 | CL-03 | [Buddy 接入](07-buddy.md) | MP-03 | buddy-client | 单 A34 最新完整内容、无依赖补取、无 BFS/无字节改写/本地读取边界/工作空间招募与安全重试 |
 | REL-01 | [四端证据与干净切换](08-cutover.md) | MP-03、MP-04、CL-01、CL-02、CL-03 | 全部涉及仓库 | 真实数据层/四端/Fleet/Daemon 证据；部署门禁使旧执行器不可达；数据安全回滚；B/A01/D4 真实证据 |

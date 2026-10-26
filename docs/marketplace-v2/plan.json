@@ -91,7 +91,7 @@
       "id": "MP-01",
       "title": "不可变版本、发布、Connector effective 与统一读取",
       "path": "issues/01-version-publication.md",
-      "description": "B 模型版本底座：current/published/release、不可变文件、Connector effective、edit_revision CAS 与 relations 必填、published/editing/effective 读投影；提供 A01 四字段诊断 DTO 底座但不实现依赖谓词（MP-02）；无 A09 restore、无 restored_from_version_id。",
+      "description": "B 模型版本底座：current/published/release、不可变文件、Connector effective（含存量回填/effective_digest）、edit_revision CAS 与 A12 完整 Write 的 relations 必填、published/editing/effective 读投影、refs 可空仅审计与 CHECK/validator 放宽；提供 A01 四字段 DTO 类型/序列化槽位但不计算/不保证 mine 必返（MP-02）；无 A09 restore、无 restored_from_version_id。",
       "depends_on": [],
       "repositories": [
         "octo-marketplace"
@@ -122,7 +122,7 @@
       "id": "MP-02",
       "title": "浮动引用、最新解析、审核观察与依赖治理",
       "path": "issues/02-dependency-governance.md",
-      "description": "唯一 LatestPublishedResolver：Expert→Skill、Team→Expert 解析最新正式发布版，Connector 读 effective，一次请求一个一致性快照；A01/A03/A34/安装/审核共用；A01 四字段诊断、SQL COUNT/facets；删除保护并集；private/space/system 矩阵；Connector 审核观察；A25 receipts。",
+      "description": "唯一 LatestPublishedResolver：输入 {root_plugin_id, root: published|explicit version_id|editing}，A01/A34 用 published、A03 显式历史根、A13/A14 用提交 version，永不回读显式根 current；Expert→Skill、Team→Expert 解析最新正式发布版（Team 仅一跳成员 Expert 再读其 current published refs），Connector 读 effective，一次请求一个一致性快照；A01/A03/A34/安装/审核共用；A01 四字段 mine 必返、SQL COUNT/facets 与 resolver 同一语义核心；删除保护并集并移除 rejectPublishedMutation 总禁令；private/space/system 矩阵；A15 resolved_dependency_observations 与 connector_observations；refs/CHECK 增量；A25 receipts。",
       "depends_on": [
         "MP-01"
       ],
@@ -150,6 +150,7 @@
         "A34"
       ],
       "owns_new_tables": [
+        "plugin_relations",
         "plugin_version_relation_refs",
         "plugin_mutation_receipts"
       ],
@@ -159,7 +160,7 @@
       "id": "MP-03",
       "title": "统一原子安装、A34 完整最新内容与安全重试",
       "path": "issues/03-installation-fleet.md",
-      "description": "A34 单 GET 按 B 返回最新完整图与全部原始文件（bundle_digest 动态、no-store、零 Fleet/零写入）；A31/A32 共用唯一 InstallCoordinator，同 key 只重放首次冻结 plan，显式安装输入变化 409；上游正常发新版仍重放原 plan，新 key 才解析最新，状态机/UNKNOWN、仅首次成功计数；同名冲突失败，不改名/不改 frontmatter。",
+      "description": "A34 单 GET 按 B 返回最新完整图与全部原始文件（bundle_digest 动态、no-store、零 Fleet/零写入）；A31/A32 共用唯一 InstallCoordinator，同 key 只重放首次冻结 plan（intent_digest 仅 root/Space/Workspace/runtime/resource_name，custom_env 仅完整 input_hmac），显式安装输入变化 409；上游正常发新版仍重放原 plan，新 key 才解析最新，状态机含 EXPIRED/UNKNOWN/租约、fleet_key=attempt_id、仅首次成功计数；移除 #128 的 pinned/mk1/adapter_version/transform_variant，flag on/off 只控制 Coordinator；attempt PK 去 space_id 与旧行迁移；同名冲突失败（same_install_identity_different_content），不改名/不改 frontmatter。",
       "depends_on": [
         "MP-02"
       ],
@@ -186,7 +187,7 @@
       "id": "MP-04",
       "title": "CLI 冻结计划驱动的历史资产转换与数据安全回滚",
       "path": "issues/04-migration.md",
-      "description": "CLI + 离线授权完成生产迁移：两次只读 preview、显式标签/映射并冻结 plan_digest、apply 只认冻结计划；create/reuse/update_source、Connector server 分组、waiting_review；数据安全回滚（不恢复指针、不删历史）；不新增 A29/A30 HTTP。",
+      "description": "CLI + 离线授权完成生产迁移：在现有 marketplace-stock-migration、internal/backfill/stockmigration 与 plugin_stock_migration_batches/roots 上演进，删除 --rollback 指针回滚/直接 release/--g4 自证批准/固定 pin，撤销旧 DSN 权限并移除/deny 旧构建使旧 --apply 不可写（旧 plugin-backfill 退役）；两次只读 preview、显式标签/映射并冻结 plan_digest、apply 只认冻结计划；run 由 scope/identity/plan_digest/root_node_key 仲裁（无幂等键），定义 frozen plan/run/batch/authorization 增量存储；plan_stale/authorization_invalid 非零退出/blocked，不用 409；create/reuse/update_source、Connector server 分组、waiting_review、reuse 漂移 plan_stale；数据安全回滚（不恢复指针、不删历史）；不新增 A29/A30 HTTP；域内验收不依赖 MP-03 安装/A34，ZIP 来源条件验收。",
       "depends_on": [
         "MP-02"
       ],
@@ -195,10 +196,14 @@
       ],
       "owns_api_ids": [],
       "extends_tables": [
-        "plugin_mutation_receipts"
+        "plugin_mutation_receipts",
+        "plugin_stock_migration_batches",
+        "plugin_stock_migration_roots"
       ],
       "owns_new_tables": [
-        "plugin_dependency_migration_map"
+        "plugin_dependency_migration_map",
+        "plugin_dependency_migration_runs",
+        "plugin_migration_authorizations"
       ],
       "issue_url": "https://github.com/Mininglamp-OSS/octo-marketplace/issues/134"
     },
@@ -215,6 +220,8 @@
       ],
       "owns_api_ids": [],
       "consumes_api_ids": [
+        "A03",
+        "A10",
         "A21",
         "A22",
         "A23",

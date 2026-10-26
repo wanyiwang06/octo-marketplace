@@ -6,7 +6,7 @@
 
 A34 单请求完整内容读取仍为确认范围，按 B 返回“最新解析图 + 全部原始文件”；Admin ZIP、Fleet 现有幂等 POST、原权限审核及市场动作保持；同名/多版本共存明确拒绝，普通安装保留市场原名/原字节，不改 Fleet/Daemon。
 
-> **评审入口：** 先读 [REVIEW.md](REVIEW.md)，里面列了评审重点、已确认决策、已知实现默认和“不要按现状合并”的 PR。决策记录见 [decisions-20261026.md](decisions-20261026.md)，决策前代码审计见 [review/](review/)。
+> **评审入口：** 先读 [REVIEW.md](REVIEW.md)，里面列了评审重点、已确认决策、已知实现默认和“不要按现状合并”的 PR。决策记录见 [decisions-20261026.md](decisions-20261026.md)，决策前代码审计见 [review/](review/)，#131–#138 的逐项评审见 [review/issue-review-131-138.md](review/issue-review-131-138.md)，关键阻塞的案例解释见 [review/blockers-explained.md](review/blockers-explained.md)。
 
 ## 阅读顺序
 
@@ -16,7 +16,10 @@ A34 单请求完整内容读取仍为确认范围，按 B 返回“最新解析�
 3. [01 · 完整技术方案](01-technical-design.md)：领域、数据、状态、权限、读取、安装、迁移、回滚、验收（B 语义）。
 4. [开发 issues 与依赖图](issues/README.md)：4 个 Marketplace 主干、3 个客户端接入、1 个联合切换。
 5. [plan.json](plan.json)：8 个 issue 的硬依赖、仓库、API/表 owner。
-6. [decisions-20261026.md](decisions-20261026.md)：用户决策记录与 D4/D7/D8/D9 的通俗解释。
+6. [execution.md](execution.md)：当前 PR 拆分、远端 issue 映射、执行顺序。
+7. [decisions-20261026.md](decisions-20261026.md)：用户决策记录与 D4/D7/D8/D9 的通俗解释。
+8. [review/issue-review-131-138.md](review/issue-review-131-138.md)：GitHub #131–#138 的逐项评审与修正建议。
+9. [review/blockers-explained.md](review/blockers-explained.md)：8 个关键阻塞 + 其他重要修正的案例解释。
 
 历史比对：[GitHub #114–#123 与固定 pin 方案的差异记录](03-github-issues-114-123-diff.md) 保留为历史；其中与 B 冲突的段落不再代表当前方案。
 
