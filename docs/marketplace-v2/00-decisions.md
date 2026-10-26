@@ -31,7 +31,7 @@
 - **Expert→Skill**：读取 Expert 已发布版本快照的 Skill pins。pin 的 Skill 版本被删除/下架/失去正式 release，或目标 plugin 不可读/已删除/embedded/未上架/受众不通过 → 依赖不可用；Expert owner 必须编辑并发布新的源版本，重新冻结 pin。
 - **Team→Expert**：读取 Team 已发布版本快照的成员 Expert pins；每个成员 Expert 使用**该 pinned Expert 版本**。该 Expert 版本的 Skill 依赖沿用**它自己快照中的 pins**，不因 Team 读取二次解析。Team 的 `member_key/role/is_leader/sort_order` 仍由 Team 边决定。
 - **Expert→Connector**：按 ID 读 `plugin_connector_effective` 的当前有效修订，Connector 无版本 pin。发布时记录 effective 观察值，审核/安装按 effective 校验；若后续明确要求 Connector 冻结，再单独立项。
-- **重新发布** = 发布新的源版本快照。发布事务重新冻结该版本所有关系的 pin：缺失 pin 解析为发布时目标当前正式发布版；显式 pin 校验后保留。因此重新发布默认刷新所有未显式指定的 pin。对已 release 的同一源版本重复发布是幂等操作，不刷新 pin。
+- **重新发布** = 发布新的源版本快照。发布事务重新冻结该版本所有关系的 pin：缺失 pin 解析为发布时目标当前正式发布版；显式 pin 也会在发布时刷新为当时目标当前正式发布版。因此重新发布默认刷新所有未显式指定的 pin。对已 release 的同一源版本重复发布是幂等操作，不刷新 pin。
 - 已发布快照的 `target_version_id` 是权威 pin；Connector 关系必须 NULL。
 
 ### 1.2 pin 解析与一致性
@@ -186,7 +186,7 @@
 
 - **P pin 冻结：** S 发布 v2 后，已发布 E 仍按自身快照 pin 的 S v1 读取；E/Team 公共列表/A34/安装不变，不需要发新版本；只有 E 重新发布新源版本才刷新 pin。Team pin 成员 E 版本，E 之后发新版不影响 Team。
 - **不回退/不追新：** pin 版本下架/删除/失去 release 时依赖不可用，公共隐藏、A34/安装整体失败；不静默用更新版或旧版、不自动换 pin。
-- **重新发布刷新：** 发布新源版本时缺失 pin 解析为发布时目标当前正式发布版，显式 pin 校验后保留；pin 图变化导致 A34 `bundle_digest` 变化。
+- **重新发布刷新：** 发布新源版本时缺失 pin 解析为发布时目标当前正式发布版，显式 pin 也会在发布时刷新为当时目标当前正式发布版；pin 图变化导致 A34 `bundle_digest` 变化。
 - **审核：** 自动模式无人工步骤；人工模式提交冻结 pin 观察 + effective；**目标发新版不 409**；只有 pin 失效/目标不可用/effective 漂移 409；批准后 pin 不变；Admin 无 pending review。
 - **D4：** mine 的 `target.version_id` 是 pin、名称取 pinned released snapshot、只匿名不可披露部分、view 非法 400；MP-01 只定义 DTO 槽位，MP-02 计算 status/reasons/target/via。
 - **删除：** live 草稿引用保护；未删除来源当前 published refs 按精确 pin 保护；Team 按 pinned 成员 Expert 版本保护；只要 Team 仍 pin 旧 Expert 版本，E 发新版本移除 S 也不释放该 Team 保护；Team 重新发布/删边后才释放；无“曾发布总禁令”，移除 `rejectPublishedMutation`。

@@ -30,8 +30,8 @@
 
 - 权威 pin 存在**源资源已发布版本的 relations 快照**里，不是只存在 live relation。
 - `target_version_id` 从“审计值/可空”改为“已发布快照必填、权威”；草稿/提交前可空，发布动作负责解析并写入。
-- A12 完整 Write 允许客户端显式给 `target_version_id`：必须是目标的正式 release 且归属正确；不给时由发布动作解析当前正式发布版本。
-- A25 schema2 ZIP 的 `version_id` 同理：可显式给，也可省略；Admin 直接生效路径在写入时解析并冻结。
+- A12 完整 Write 的 `target_version_id` 仅作草稿输入：必须是目标的正式 release 且归属正确；发布动作统一刷新为发布时目标的当前正式发布版本（显式值不永久保留）。
+- A25 schema2 ZIP 的 `version_id` 同理：仅作草稿输入；Admin 直接生效路径在写入时解析并冻结为发布时目标当前正式发布版本，显式值不永久保留。
 - Connector 关系仍必须 NULL。
 
 ### P5 读取与图
@@ -98,7 +98,7 @@
 ## 3. API/错误变化
 
 - 已发布 Expert/Team relations 的 `target_version_id` 必填；草稿可空；Connector 必须 NULL。
-- 发布时缺失 pin 由服务端解析；显式 pin 必须通过归属/release/audience 校验；显式指向非正式版本 → 400。
+- 发布时所有 pin（含显式 pin）统一刷新为当时目标当前正式发布版本；显式 pin 必须通过归属/release/audience 校验；显式指向非正式版本 → 400。
 - 读取/A34/安装只用 pin；pin 不可用 → 404/409 依赖错误，不回退最新。
 - A15 新版本不再 409；pin 失效/Connector effective 变化才 409 `dependency_changed`。
 - A01 mine `dependency_availability.target.version_id` = pin；不再写 latest。

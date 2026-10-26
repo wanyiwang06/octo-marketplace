@@ -60,7 +60,7 @@
 | sort_order | integer，默认0 | >=0 |
 | data | object，默认{} | team仅member_key/role/is_leader且三项必填；member_key正则/长度、role非空≤500字符、唯一Leader及非Leader禁保留role=leader见技术§5.1；其余关系只能{} |
 
-RelationSnapshot 与上述同字段，source_plugin_id 可由所属版本推导；不允许客户端写 observed_*。**pin `target_version_id` 不进入 `content_digest`**（草稿为空、发布时才补齐），但**显式给出的 pin 属于 RelationSnapshot 身份，参与新版本/复用判定**；发布时补齐缺失 pin 不单独产生新版本。pin 是已发布快照的一部分，进入 pin 图、可用性、删除保护、A34 与安装。目标发新版不改变已发布关系的 pin、不要求来源发新版、不触发引用方重新审核；来源发布新版本才刷新未显式指定的 pin。Review 独立返回 `connector_observations:[{plugin_id,effective_revision,effective_digest}]` 和 pin 观察 `resolved_dependency_observations`，这些是服务端冻结值，不是 latest。
+RelationSnapshot 与上述同字段，source_plugin_id 可由所属版本推导；不允许客户端写 observed_*。**pin `target_version_id` 不进入 `content_digest`**（草稿为空、发布时才补齐），但**显式给出的 pin 仅作草稿输入；发布时同样刷新为目标当前正式发布版**；发布时补齐缺失 pin 不单独产生新版本。pin 是已发布快照的一部分，进入 pin 图、可用性、删除保护、A34 与安装。目标发新版不改变已发布关系的 pin、不要求来源发新版、不触发引用方重新审核；来源发布新版本会刷新全部 pin。Review 独立返回 `connector_observations:[{plugin_id,effective_revision,effective_digest}]` 和 pin 观察 `resolved_dependency_observations`，这些是服务端冻结值，不是 latest。
 
 来源仍使用既有 private 本人草稿/发布时：private 来源可引用已发布 system、同 Space 的 space 及**同 owner private**（private Expert→private Skill、private Team→private Expert 合法）；**space/system 来源不得引用 private；跨 Space 禁止；同 Space 不同 owner 的 private 仍禁止。private 同 owner private→private 合法。** private 资产作为依赖时不扩大受众，A34/安装只对同 owner 可见。纯本地组合不因此纳入市场。
 
@@ -169,7 +169,7 @@ Write 保留现有 `{plugin:{plugin_id?,plugin_name,plugin_type,visibility,versi
 - `version` 是候选SemVer标签，更新省略沿用current标签；正式发布时与release验证，不靠保存序号判断。Connector仅保留原合法展示标签兼容，无版本选择语义。
 - `relations:[]`明确清空；不是PATCH语义。返回Detail。
 - owner/Space不可写；Tenant写入visibility是编辑拟定受众，保存到declared_visibility，不立即改变线上visibility。发布时按候选图校验outbound并检查incoming后原子切换；Admin更新的归属/范围保持原值。
-- relations 存目标 `plugin_id` 与 pin `target_version_id`；草稿可省略/为 null，发布/提交补齐，显式 pin 校验后保留。保存只记录目标身份与显式 pin，不解析 latest，也不把缺失 pin 猜成目标当前版本。
+- relations 存目标 `plugin_id` 与 pin `target_version_id`；草稿可省略/为 null，发布/提交补齐，显式 pin 也会在发布时刷新为当时目标当前正式发布版。保存只记录目标身份与显式 pin，不解析 latest，也不把缺失 pin 猜成目标当前版本。
 
 同一content_digest不能直接判为重复保存：候选version_label、declared_visibility或完整RelationSnapshot身份（含关系身份、排序、data 及**显式给出的 pin**）变化也生成新不可变Version；只有上述全部冻结输入一致才可复用current。content_digest只由服务端统一codec生成，客户端视为opaque并原样传递，不自行用JSON.stringify或Go默认编码推导；它不等于公开可重算的A34 bundle_digest。**pin 不进入 content_digest**（草稿可空、发布时才补齐）；显式 pin 变化属于关系身份变化，应生成新快照；发布时补齐缺失 pin 不改变内容摘要、不单独产生新版本。目标发新版不改变已发布来源的摘要/pin，也不要求来源发新版本。
 
