@@ -1,6 +1,8 @@
 # CL-03：Buddy 单 A34 最新内容、本地安装与安全重试（B 模型）
 
 > 决策依据：[00-decisions](../00-decisions.md) B 模型、D3（原名/原字节、无共存、不改写）、D6（坏图失败）、D7（Connector effective）、D9（同 key 重放首次冻结 plan、新 key 最新）。Buddy 只做客户端接入，不改 Fleet/Daemon，不新增市场管理入口。
+>
+> **范围与基线：** 本 issue 只改 `octo-buddy-client` 客户端，不改 `octo-marketplace` 后端、Fleet 或 Daemon。`eec5223` 是 `octo-marketplace` 的基线，不是 Buddy 的 commit；`octo-buddy-client` 是外部依赖仓库，须以自身 commit/日期登记基线，本 workspace 无其 checkout，源码断言实施前须复核。
 
 ## 目标（Goal）
 

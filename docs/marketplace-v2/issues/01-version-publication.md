@@ -94,6 +94,6 @@ MP-01 独立合并覆盖无依赖 Skill/Connector 及唯一保存/发布/审核�
 
 ## 本轮评审修订验收
 
-- [ ] Admin 无审核步骤：Skill/Expert/Team 沿用现有直接生效事务，Connector 同事务更新 effective；仍校验 CAS/依赖/范围，不创建 pending review。
+- [ ] Admin 无资产审核：A24 Skill/Connector create/update 直接生效；A25/A26 Expert/Team ZIP/reupload 直接生效；A24 拒绝 Expert/Team JSON；Connector 同事务更新 effective；不创建 pending review，只有 Tenant 按 Space 策略审核；仍校验 CAS/依赖/范围。
 - [ ] 需审核的 Tenant Connector 编辑不改 effective；与 Admin 直接生效分别测试，避免通用“必须审核”分支覆盖 Admin。
 - [ ] 基于实际合并基线复用 release/refs 等既有表，只实施增量 DDL；MP-01 → MP-02 → MP-03 顺序保持，不提前放通缺失依赖保护的入口。
