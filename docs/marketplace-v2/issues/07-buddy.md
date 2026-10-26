@@ -15,7 +15,7 @@
 
 ## 背景（Background）
 
-P 模型下 Expert→Skill、Team→Expert 在源发布/提交时冻结 `target_version_id` pin，Team 成员角色/Leader/顺序仍由 Team 边决定；Connector 读 effective。因此 Buddy 也不能再用“detail + download ZIP + 补 frontmatter”拼内容：一次 A34 返回 pin 图和原字节；同一源版本、同一组 pin 的内容与 `bundle_digest` 稳定，目标发新版不会改变，只有源资源重新发布才产生新 pin 图。Buddy 不需要跨请求缓存，也不得把一次响应当作跨源版本的长期固定图。
+P 模型下 Expert→Skill、Team→Expert 在源发布/提交时冻结 `target_version_id` pin，Team 成员角色/Leader/顺序仍由 Team 边决定；Connector 读 effective。因此 Buddy 也不能再用“detail + download ZIP + 补 frontmatter”拼内容：一次 A34 返回 pin 图和原字节；同一源版本、同一组 pin（Connector effective 未变时）的内容与 `bundle_digest` 稳定，目标发新版不会改变，只有源资源重新发布才产生新 pin 图。Buddy 不需要跨请求缓存，也不得把一次响应当作跨源版本的长期固定图。
 
 D9 下 Buddy 的招募安装与 Web/CLI 共用同一 `InstallCoordinator`：服务端同 key 只重放首次冻结 plan；Buddy 只持久化/重发原请求与完整规范化参数，不持有服务端 plan。显式安装输入变化 409；目标正常发新版不改变源 pin，仍按原请求重放；源资源重新发布后由用户以新 key 新安装并读取当前源发布快照；不得自动换 key、删除 pending、跨 URL 或退回本地安装。
 
@@ -70,7 +70,7 @@ D3 下 Buddy 不实现同名/多版本共存：不改写 frontmatter、不生成
 
 ## 逐项验收（Acceptance）
 
-- [ ] 市场名称、详情、Skill 正文/完整文件与已发布源快照的 pin 根一致；新草稿和 Connector 未批准编辑不泄露；目标发新版不改变 pin，同一源版本内容稳定，不需要跨请求缓存；源重新发布后下一次读取才用新 pin。
+- [ ] 市场名称、详情、Skill 正文/完整文件与已发布源快照的 pin 根一致；新草稿和 Connector 未批准编辑不泄露；目标发新版不改变 pin，同一源版本（Connector effective 未变时）内容稳定，不需要跨请求缓存；源重新发布后下一次读取才用新 pin。
 - [ ] Skill/Connector 直接异常或成员 Expert 下架、删除、缺失时，A01 不返回受影响 Expert/Team；Team 沿 pinned 成员 Expert 版本判定，pin 版本或其依赖不可用时 Team 不展示。列表、分页 total、分类数量及 tags 与 Web 公共市场同口径，Buddy 无逐依赖请求、A34 逐卡检查或分页后过滤。
 - [ ] 来源未发布草稿新增异常依赖不影响合法发布版；仅草稿移除坏依赖不恢复线上，发布新修复版本或 pin 版本恢复合法上架后，沿用已有列表刷新在下一次查询恢复，不新增推送/轮询。此过程不改来源 `listing_state` 或增加生命周期 UI。
 - [ ] **P pin：** 成员 Expert/Skill 发新版后，已发布 Team 下一次 A34 仍返回源快照 pin 的旧内容、`bundle_digest` 不变；Team 成员角色/Leader/顺序不变；只有 Team 重新发布才刷新成员 pin。

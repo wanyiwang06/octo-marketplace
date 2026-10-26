@@ -15,7 +15,7 @@
 
 ## 背景（Background）
 
-2026-10-26 决策已锁定 P 模型：Expert→Skill、Team→Expert 在源发布/提交时冻结 `target_version_id`，公共读取/A01/A34/安装/审核只读 pin；Connector 读 effective；A09 restore、A29/A30 HTTP、同名/多版本共存均已明确不做。本 issue 的放行对象因此是“源发布冻结 pin 图 + 一个安装引擎 + CLI 迁移（含存量 pin 回填） + 数据安全回滚”的完整切换，而不是“读时解析”。
+2026-10-26 决策已锁定 P 模型：Expert→Skill、Team→Expert 在源发布/提交时冻结 `target_version_id`，公共读取/A01/A34/安装/审核只读 pin；Connector 读 effective；A09 restore、A29/A30 HTTP、同名/多版本共存均已明确不做。本 issue 的放行对象因此是“源发布冻结 pin 图 + 一个安装引擎 + CLI 迁移（含存量 pin 回填） + 数据安全回滚”的完整切换，而不是“每次读取重新选版本”。
 
 D10 要求：新改造完成后旧市场执行器不可达；回滚只接受兼容二进制 + 从历史生成新版本的恢复，不恢复 `current/published` 指针、不恢复 embedded/inline。部署层门禁必须以真实入口拒绝/网络隔离/停发送进程实现，且**不能只靠网关/网络隔离**：旧 `plugin-backfill`、`marketplace-stock-migration` 等本地二进制可用 DSN 直连 MySQL，必须同时撤销 DB 账号/DSN/权限、移除或 deny 旧二进制。不能只隐藏客户端按钮，也不能假设存在未实现的业务开关。
 
@@ -54,7 +54,7 @@ D10 要求：新改造完成后旧市场执行器不可达；回滚只接受兼�
 
 5. **发布隔离。** 发布 v1→保存 v2→提交 v2→保存 v3→批准 v2；核对外部列表/搜索/分页/详情都是 v2，编辑仍是完整 v3，文件、关系、标签、名称和成员计数一致，批准不把冻结内容写回 current。
 6. **Admin ZIP。** Expert/Team 仅上传/重传原 ZIP，清单使用目标 ID（`version_id` 可省略；省略时 Admin 写入动作解析并冻结为 pin；显式值必须属于目标且已 release）且是最终关系，`resolved[]` 记录本次冻结 pin，无选择器或页面关系覆盖，过期 `edit_revision` 返回冲突；A24 拒绝 JSON 内容写（400 `zip_only_required`）。**Admin 无资产审核**：创建/更新/重传直接生效并同步 effective、按 P 冻结缺失 pin，不产生 A14/A16 pending review；Tenant 审核/Space 策略与上下架访问检查保持原样。不新增发布矩阵、上架按钮或接口；非默认场景既有投放可见性保留，default 不能隐藏。
-7. **依赖矩阵与职责。** 目标 ID 归属/release/effective 证明正确；system 仅引用已发布 system；space 仅已发布 system/同 Space 的 space；private 可引用已发布 system、同 Space 的 space、同 owner private；**space/system→private 拒绝**；跨 Space 拒绝，Admin 不绕过。拒绝本地路径/Fleet `skill_id` 充当市场关系，本地组合不产生市场资产。原 owner 提交、审核角色及 Space 自动审核开关行为不变，自动/人工批准都校验提交时冻结的 pin 图与 Connector effective，未授权数据不泄露。
+7. **依赖矩阵与职责。** 目标 ID 归属/release/effective 证明正确；system 仅引用已发布 system；space 仅已发布 system/同 Space 的 space；private 可引用已发布 system、同 Space 的 space、同 owner private；**space/system→private 拒绝**；跨 Space 拒绝，Admin 不绕过。拒绝本地路径/Fleet `skill_id` 充当市场关系，本地组合不产生市场资产。原 owner 提交、审核角色及 Space 自动审核开关行为不变，自动/人工批准都校验提交时冻结的 pin 图与 Connector effective，目标只发新版不构成 `dependency_changed`，未授权数据不泄露。
 8. **保护与并发。** 保留既有 active source、`r.status=1` 且来源/关系均未删除的 live incoming 保护，无 listing 过滤，草稿 live 边同样阻止删除；**published refs 仅取未删除来源的当前 `published_version_id`（不是全部历史发布版）**，按精确 `target_version_id` pin 保护目标 plugin 与 pin 版本，再补 Team→pinned 成员 Expert **版本**→该版本 refs 的间接引用保护；**验证没有“曾发布即禁止删除”总禁令**：仅历史发布、无任何保护引用的资产可删除。引用式来源删除仅删除自身及自身关系，不删共享目标；旧 embedded 历史仅显式迁移。保存/批准/删除竞争满足统一锁序和 CAS。
     **A01 公共可用性与 COUNT/facets：**通过真实 Web 与 Buddy 公共列表抓包并对照 DB，逐一使直接 Skill/Connector、Team 成员 Expert 及其依赖下架、删除或缺失，来源 Expert/Team 不再出现在公共列表。证明在 SQL 分页/COUNT 之前使用同一 pin 谓词，翻页无事后过滤空洞、total 正确，分类 `plugin_count` 与公共 tags 一致；`current`/目标当前版/旧版本不得替代 pin。缺应有版本/refs、DB 故障走既有错误，不伪造 available；列表判定不调用 A34 或读文件逐卡校验。
     **P pin 与不回退：**Expert E / Team T 发布时 pin S v1；S 发布 v2 后 E/T 的下一次公共读取/A34 仍用 S v1，E/T 无需发新版；S v1 下架/删除后 E/T 隐藏且 A34 返回 409 `dependency_unavailable`/`dependency_changed`、安装失败，**不得回退 S v2 或旧版**；S v1 合法恢复后下一次查询恢复。只有 E/T 重新发布才把缺失 pin 刷新到发布时目标当前正式发布版（如 S v2）。Team 发布时 pin 成员 Expert 版本，Expert 发新版不改变 Team 内容；Team 重新发布才刷新成员 pin；Team 的角色/Leader/顺序不随成员 Expert 发新版改变。
@@ -118,7 +118,7 @@ D10 要求：新改造完成后旧市场执行器不可达；回滚只接受兼�
 - [ ] **D6/D7：**private 可引用已发布 system/同 Space 的 space/同 owner private，space/system→private 拒绝；Connector 审核观察与 409 生效、安装/A34 读 effective。
 - [ ] 公共 Web/Buddy 的 A01 分页/COUNT、分类 `plugin_count` 及公共 tags 使用同一 pin 谓词；直接/间接坏 pin 隐藏、pin 不被 current/目标当前版替代，来源状态不变；草稿修复不恢复、正式发布修复及 pin 版本合法恢复在下一次查询恢复。
 - [ ] Web 全部/专家/专家团真实 MineTable 保留全部原可管理非删除资产及 total、原状态和操作，独立标记/多原因 Tooltip 的 hover 及键盘 focus 均有证据；published/editing 诊断根、无依赖 available、跨 Space 与 via 权限匿名聚合、不泄露隐藏数量、无前端过滤/扇出逐项通过。
-- [ ] Web/CLI/Buddy 完整内容场景各一次 A34 GET 拿全正确 pin 目标、全部原始文件与有效 Connector；无 Fleet 调用/业务写入，原市场名称/内容未变；目标发新版后同一源版本的 `bundle_digest` **不变**，源重新发布后才变化；错误按 400/404/409/413/500 矩阵全失败、无裁剪或客户端 fallback，**pin 的 S v1 下架返回 409（S v2 存在也不回退）**。A34 正式确认不等于本轮已运行通过。
+- [ ] Web/CLI/Buddy 完整内容场景各一次 A34 GET 拿全正确 pin 目标、全部原始文件与有效 Connector；无 Fleet 调用/业务写入，原市场名称/内容未变；目标发新版后同一源版本（Connector effective 未变时）的 `bundle_digest` **不变**，源重新发布后才变化；错误按 400/404/409/413/500 矩阵全失败、无裁剪或客户端 fallback，**pin 的 S v1 下架返回 409（S v2 存在也不回退）**。A34 正式确认不等于本轮已运行通过。
 - [ ] 两入口同原子引擎、POST 响应丢失后原 key/完整原请求安全重试及幂等计数均有真实 Fleet 服务/数据库证据；同 key 不因目标发新版改变原 plan；新 key 按当前源发布快照读取 pin 图，不读目标当前发布版；Marketplace 出站强制 `retry_until`，客户端在 `min(startedAt+窗口, retry_until)` 停止重发，未知保留与人工核对不依赖 Fleet 改造。
 - [ ] **无共存：**同名不同内容安装冲突失败，不生成 `mk1`、不改写 frontmatter/目录名；不把共存列为通过/失败门槛。
 - [ ] MP-04 CLI 的两次 preview/冻结计划/映射/恢复、存量 pin 回填与真实安装前后能力比较闭合；apply 只认冻结计划+离线授权，**无 A29/A30 HTTP**；异常有逐源阻断，未改历史、未自动生产迁移。
