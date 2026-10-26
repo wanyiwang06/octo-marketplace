@@ -1,23 +1,39 @@
 # Marketplace v2 决策记录（2026-10-26）
 
-> 本文记录用户已拍板的决策、落地口径，以及对 D4/D7/D8/D9 的通俗解释。用户在本次对话中再次明确确认：**Team→Expert 也跟随当前正式发布版；曾发布资源在没有保护引用时可删除**。分析背景见 [PR124–127 差距与决策](review/pr124-127-gap-and-decisions.md)。
+> 本文记录用户已拍板的决策、落地口径，以及对 D4/D7/D8/D9 的通俗解释。用户在本次对话中再次明确确认：**Team→Expert 也跟随当前正式发布版；曾发布资源在没有保护引用时可删除**。**其中“跟随当前正式发布版”的 B 引用结论已被 2026-10-26 晚间的 P 修订取代（见下节），删除结论仍有效。** 分析背景见 [PR124–127 差距与决策](review/pr124-127-gap-and-decisions.md)。
+
+## 修订（2026-10-26 晚）：P 模型（上架冻结依赖）取代 B
+
+> **本节是新权威修订。** 用户在 PR #139 评审后决定改用 **P：源资源发布时冻结依赖版本**，完整规格见 [decisions-20261026-pin.md](decisions-20261026-pin.md)。本文第 9 节及 §2/§7/§8 中“公共读取每次解析最新”的结论均为历史记录，已被 P 取代；§10 第 11 条已按 P 更新。保留历史正文只为审计，不得据此派开发任务。
+>
+> P 与 B 的差异：
+>
+> - Expert→Skill、Team→Expert 在源资源发布/提交时冻结 `target_version_id`；已发布快照 pin 为权威，草稿可空、发布/提交动作解析并冻结。
+> - 公共读取/A01/A03/A34/安装/审核只读 pin，不再解析目标当前正式发布版；目标发新版不改变已发布来源。
+> - pin 版本失效/目标不可用 → 整体失败或公共隐藏，不回退更新版/旧版、不自动切换；只有源资源重新发布才刷新 pin。
+> - A15 提交冻结 pin/effective，批准只校验 pin/effective；目标发新版不 409 `dependency_changed`。
+> - 删除保护按精确 pin（目标 plugin + pin 版本）；Team 间接按 pinned 成员 Expert 版本→其 pin refs。
+> - 存量已发布资产在切换时由迁移 CLI 回填 pin；无可冻结版本 blocked，禁止读取懒回填。
+> - private 语义不变：同 owner private→private 合法（private Expert→private Skill、private Team→private Expert）。
+> - Connector 不 pin，仍按 ID + effective。
+> - PR #139 的 B 实现（latest graph / A01 latest SQL / A15 批准重解析 / A34 动态依赖 / 安装 latest）需重做，不能按现状评审或合并。
 
 ## 1. 已拍板
 
 | 决策 | 用户选择 | 落地口径 | 代码/文档动作 |
 |---|---|---|---|
-| **D1 删除生命周期** | **保留原有删除能力；按引用关系保护；不新增“曾发布即禁止删除”** | 删除前检查 live incoming（含草稿、不过滤 listing）∪ published refs ∪ Team→Expert→Skill 间接引用；没有保护引用的曾发布资源也可删 | 去掉 `rejectPublishedMutation` 的曾发布总禁令；`Delete/DeleteGraph` 改为并集保护；改测试；更新方案 G02/C03/API A19 以明确“无总禁令” |
+| **D1 删除生命周期** | **保留原有删除能力；按引用关系保护；不新增“曾发布即禁止删除”** | 删除前检查 live incoming（含草稿、不过滤 listing）∪ published 精确 pin refs（保护目标 plugin 与 pin 版本）∪ Team→pinned Expert 版本→Skill 间接引用；没有保护引用的曾发布资源也可删 | 去掉 `rejectPublishedMutation` 的曾发布总禁令；`Delete/DeleteGraph` 改为并集保护；改测试；更新方案 G02/C03/API A19 以明确“无总禁令” |
 | **D2 A09 restore** | **不要** | 不做 restore-to-draft；保留历史读取 A04–A08 | 从 MP-01 owns_api_ids/验收、API §3.1、plan.json、CL-02 删除 A09；技术设计 §3.1/§4.1 的 `restored_from_version_id`/恢复条目删除；代码无新增 |
 | **D3 同名/多版本共存** | **不允许；同名冲突失败** | 普通安装保留市场原名/原字节；同名不同内容安装冲突，不生成别名、不改写 frontmatter | 删除 `mk1` 默认命名/`SKILL.md` 改写；迁移校验不依赖 `mk1`；更新测试；方案 C07/§6 从 “deferred” 改为 “本期不支持，冲突失败” |
-| **D4 A01 诊断 DTO** | **已确认：B 模型 + `dependency_availability` 四字段**（见 §2/§9） | B：Expert→Skill、Team→Expert 都解析最新；诊断区分 Expert/Team 自己的 published/editing；无权依赖匿名 | 重做 #127 的 DTO/查询：四字段、固定 code、view、匿名聚合；target.version_id 用最新解析值 |
-| **D5 生产迁移** | **本期要做；接受 CLI；回滚必须数据安全** | 本期用 CLI + 离线授权做生产迁移（不做 A29/A30 HTTP）；CLI 内保留两次 preview/冻结摘要；回滚不恢复 current/published 指针 | 改 `stockmigration`：加冻结 plan/digest、apply 只认冻结计划；删除指针回滚；#126 的 `Closes #119` 去掉；#121/#123 验收改为 CLI 口径 |
-| **D6 private/下架目标** | **同 owner private 可作为依赖；下架 Skill 后引用它的专家不可见（PR127 口径）** | 保留 `private 来源 → 同 owner private 目标`；space/system 来源不得引用 private；下架依赖的 Expert 公共列表/详情隐藏，A34/安装按同一可用性 gate 失败；owner 在 mine 看到诊断 | 保留 `references.go:55`；删除方案“private 一律禁止”的表述并改为“同 owner private 允许，其余禁止”；给 A34/安装加 availability gate；补下架/私有负测试 |
+| **D4 A01 诊断 DTO** | **已确认：P 模型 + `dependency_availability` 四字段**（见修订节；§2/§9 为历史） | P：Expert→Skill、Team→Expert 发布冻结 pin、读取只读 pin；诊断区分 Expert/Team 自己的 published/editing；无权依赖匿名 | 重做 #127 的 DTO/查询：四字段、固定 code、view、匿名聚合；target.version_id 用 pin |
+| **D5 生产迁移** | **本期要做；接受 CLI；回滚必须数据安全** | 本期用 CLI + 离线授权做生产迁移（不做 A29/A30 HTTP）；CLI 内保留两次 preview/冻结摘要；回滚不恢复 current/published 指针；生产切换时回填存量已发布资产的 pin | 改 `stockmigration`：加冻结 plan/digest、apply 只认冻结计划；删除指针回滚；#126 的 `Closes #119` 去掉；#121/#123 验收改为 CLI 口径 |
+| **D6 private/下架目标** | **同 owner private 可作为依赖；pin 的 Skill 版本下架后引用它的专家不可见（PR127 口径）** | 保留 `private 来源 → 同 owner private 目标`（Expert→Skill、Team→Expert 均为合法主路径）；space/system 来源不得引用 private；pin 依赖下架/删除的 Expert 公共列表/详情隐藏，A34/安装按同一可用性 gate 失败；owner 在 mine 看到诊断 | 保留 `references.go:55`；删除方案“private 一律禁止”的表述并改为“同 owner private 允许，其余禁止”；给 A34/安装加 availability gate；补下架/私有负测试 |
 | **D7 Connector effective** | **Admin 不审核；Tenant 沿用原审核策略** | Admin 直接写入 effective；需审核的 Tenant 编辑批准后产生新的 effective；Expert/Team 审核冻结 effective_revision/digest，变化 409 | 新增 `plugin_connector_effective` + observations + 读路径改造（§3） |
 | **D8 CAS** | **Admin/Web/CLI/Bot 都带版本令牌，都改** | `edit_revision` + `expected_edit_revision`；更新必带，新建省略；缺失/过期 409；relations 缺失 400 | 迁移/模型/handler/service/repo/四端客户端/OpenAPI（§4） |
-| **D9 安装引擎/重试** | **保留 A32 URL；允许按最新配置来 = 新 key 新安装** | 同 key 只重放原 plan；显式安装输入变化 409；上游正常发新版仍重放原 plan；想用最新内容则新 key 新安装；A32 接同一引擎，要求 Key/用户/UUID | A31/A32 共用 Coordinator/attempt；删市场 legacy 补偿；补状态机/UNKNOWN/仅首次计数（§5） |
+| **D9 安装引擎/重试** | **保留 A32 URL；允许按新配置来 = 新 key 新安装** | 同 key 只重放原 plan；显式安装输入变化 409；目标发新版不改变 pin、仍重放原 plan；想用源重新发布后的内容则新 key 新安装（读当前源发布快照）；A32 接同一引擎，要求 Key/用户/UUID | A31/A32 共用 Coordinator/attempt；删市场 legacy 补偿；补状态机/UNKNOWN/仅首次计数（§5） |
 | **D10 灰度/退役** | **旧市场执行器在新改造完成后不可达；回滚接受兼容二进制 + 新版本恢复** | 部署层隔离 + 全入口阻断；flag 只作额外手段；不恢复指针/legacy | REL-01 增加部署 gate 与拒绝证据；删除指针回滚；保留历史/对象/attempt |
 
-## 2. D4 · A01 的 mine 诊断到底返回什么
+## 2. D4 · A01 的 mine 诊断到底返回什么（历史分析，已被 P 修订）
 
 **先回答你的问题：** 是的，本质就是“保存草稿”和“正式发布”的区别；但不是让 Web 自己判断，而是后端明确告诉它“这次检查的是哪个版本”。
 
@@ -29,7 +45,7 @@
 - 所以才会出现：S v1 下架、S v2 正常，E v1 的公共依赖仍然坏；你的草稿 E v2 改成 pin S v2 后，必须**正式发布 E v2**，公共市场才会恢复。
 - **如果你要的是“公共市场每次读 S 的最新版”**，那就不是固定 pin，而是浮动引用：E 的发布快照不再存 `target_version_id`，公共列表/A34/安装每次解析最新 S；审核无法冻结依赖图，安装不可复现，A34 每次结果可能不同。这会改动 MP-01/02/03、A34、审核、迁移和全部客户端，**不是只改 D4 的字段**。
 
-最终已选择公共市场跟随最新版；下文的固定 pin 场景仅用于解释旧实现与 DTO 差异。B 模型下的 D4 语义见 §9.2。
+当时最终选择公共市场跟随最新版（B）；该结论已被 P 取代。下文的固定 pin 场景仅用于解释旧实现与 DTO 差异；P 下的 D4 语义见修订节与 P 决策。
 
 **如果是固定 pin，你要定的不是字段名，而是三件事：**
 
@@ -88,7 +104,7 @@
 
 **我的建议：采用上面的 `dependency_availability` 四字段结构，重做 #127 的 DTO/查询；保留它已经做好的 SQL 前置过滤/COUNT/facets。**
 
-最终诊断口径见 §9.2；本节的 S v1 示例属于旧固定 pin 场景，不作为新版验收样例。
+最终诊断口径见修订节与 [P 决策](decisions-20261026-pin.md)；本节的 S v1 示例属于旧固定 pin/B 场景，不作为新版验收样例。
 
 ## 3. D7 · Connector 的“有效态”是什么
 
@@ -149,9 +165,9 @@
 - **但“Daemon/Codex 真的能同时加载两份且不混版本”没有验证：** 需要真实 Fleet → PostgreSQL → Daemon 联调，检查目录/frontmatter/支持文件/共享扫描根；方案明确不允许为此改 Fleet/Daemon。
 - **按你的条件：** 如果只看 Fleet 代码，答案是“不需要改”；但本期没有运行时证据，且方案不允许改 Daemon。因此**本期按“不允许共存、同名冲突失败”执行**；以后要做，先做真实联调，发现要改 Fleet/Daemon 就停。
 
-## 7. 固定 pin 下，Skill 更新会不会自动传到 Expert？
+## 7. 固定 pin 下，Skill 更新会不会自动传到 Expert？（历史对照）
 
-> 本节解释 PR #125 的旧固定 pin 行为，是历史对照；最终 B 模型见 §9，不能按本节派开发任务。
+> 本节解释 PR #125 的旧固定 pin 行为，是历史对照；最终引用模型见修订节与 [P 决策](decisions-20261026-pin.md)，不能按本节派开发任务。
 
 **不会自动传。** 固定 pin 的含义就是：Expert 的已发布快照写死了它当时引用的 Skill 版本。
 
@@ -177,7 +193,7 @@
 
 如果你要的是“Skill 一更新，所有引用它的 Expert 自动用新版”，那就不是固定 pin，而是浮动 latest（或 semver range）；这会重新引入审核漂移、安装不可复现、A34 结果变化，需要单独决策，不建议本期顺手改。
 
-## 8. “自动跟随最新版”和 B（公共市场每次读最新）是同一种吗？
+## 8. “自动跟随最新版”和 B（公共市场每次读最新）是同一种吗？（历史对照；B 已被 P 取代）
 
 **不完全是。B 是“自动跟随”的一种实现，但“自动跟随”还可以做成保留固定 pin 的自动新版本。** 关键区别是：**谁在什么时候解析版本、Expert 要不要出新版本、审核能不能冻结。**
 
@@ -196,11 +212,11 @@
 - **C = 发布时取最新**：只在 owner 发 Expert 新版本时自动选最新，之后仍固定；不会因为 Skill 更新自动变。
 - **A = 当前方案**：完全手动。
 
-**建议：** 如果你只是不想每次手动改 pin，选 **D**；如果你要“公共市场永远零维护跟随最新”，选 **B**，但要接受审核/复现性代价。**不要做成“公共列表显示最新、安装仍用旧 pin”的混合体**，那会让展示内容和实际安装不一致。
+**建议（历史）：** 当时的比较是选 **D** 或 **B**。用户随后选择了 B，之后又在 PR #139 评审后改为 **P（上架冻结）**；P 兼顾审核可冻结与安装可复现，代价是依赖发新版后需源 owner 重新发布。**不要做成“公共列表显示最新、安装仍用旧 pin”的混合体**。
 
-## 9. B 模型（用户已选）的范围与影响
+## 9. B 模型（历史，已被 P 取代）的范围与影响
 
-**用户已选 B：公共市场/读取/安装每次解析最新版。** 这是引用模型变更，不是改 D4 字段。
+**历史记录：用户当时选择 B（公共市场/读取/安装每次解析最新版），现已被 P 取代。** 本节仅保留决策过程，执行以 [P 决策](decisions-20261026-pin.md) 为准。
 
 ### 9.1 已确认的范围
 
@@ -262,12 +278,14 @@ D4 的 `dependency_availability` 仍然需要，但含义调整为：
 8. **D8 CAS：** `edit_revision` + `expected_edit_revision`；更新必带、新建省略；缺失/过期 409；relations 缺失 400；Admin/Web/CLI/Bot 都改。
 9. **D9 安装：** 保留 A32 URL；A31/A32 同一引擎；同 key 重放原 plan；配置变了用新 key 新安装；仅首次成功计数。
 10. **D10 退役/回滚：** 新改造完成后旧市场执行器不可达；回滚接受兼容二进制 + 新版本恢复；不恢复指针/legacy。
-11. **B 引用模型：** Expert→Skill、Team→Expert 都解析目标当前正式发布版；Connector 按 ID+effective；Team 的 `member_key/role/is_leader/sort_order` 仍由 Team 边决定；最新版不可用时不回退旧版。
-12. **审核：** 沿用现有 Space 策略（默认自动，Space 可关）；自动模式内部重试，不把 409 变成日常步骤；人工模式窗口变化才 409；批准后依赖继续跟随最新，Skill/Expert 发新版不要求重新审核引用方。
+11. **引用模型（P，已在晚间修订取代 B）：** Expert→Skill、Team→Expert 在源发布时冻结 `target_version_id`；读取/A01/A34/安装/审核只读 pin；Connector 按 ID+effective；Team 的 `member_key/role/is_leader/sort_order` 仍由 Team 边决定；pin 不可用时不回退/不自动切换。
+12. **审核：** 沿用现有 Space 策略（默认自动，Space 可关）；自动模式内部重试，不把 409 变成日常步骤；人工模式 pin/effective 变化才 409；目标发新版不构成 `dependency_changed`；批准后 pin 不变，Skill/Expert 发新版不要求重新审核引用方，也不影响已发布来源。
 
 **核心决策已确认，无剩余待拍板项。** 两个实现边界均已由用户明确确认，已写入 00/01/02：① Admin 系统 Connector 的既有直接生效写入保留（同步更新 effective；Tenant Connector 编辑必须审核）；② 用户已确认依赖更新仅审计展示，不主动发送依赖更新通知。若要把 Admin Connector 也纳入审核或新增主动通知，属于后续变更。
 
 **文档落地状态（2026-10-26 15:15）：** `00-decisions.md`、`01-technical-design.md`、`02-api-contracts.md`、`README.md`、`issues/README.md`、8 个 issue、`plan.json` 已按 B/D1–D10 重写；`03-github-issues-114-123-diff.md` 已加历史说明。代码尚未修改，下一步按 00/02 拆任务。
+
+**P 修订落地状态（2026-10-26 晚）：** `issues/00–04`、`issues/README.md`、`plan.json`、`README.md`、`REVIEW.md`、`execution.md` 已按 P 改写；核心 `00-decisions.md`/`01-technical-design.md`/`02-api-contracts.md` 已按 P 改写，与本文一致；冲突处以 [P 决策](decisions-20261026-pin.md) 与 00 为准。
 
 ## 本轮五组评审意见的落地记录
 

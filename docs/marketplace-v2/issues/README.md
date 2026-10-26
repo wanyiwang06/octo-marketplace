@@ -1,21 +1,23 @@
-# 开发规格与依赖关系（B 模型）
+# 开发规格与依赖关系（P 模型）
+
+> **2026-10-26 权威修订：P 模型（上架冻结依赖）取代 B 模型。** 权威文档：[decisions-20261026-pin.md](../decisions-20261026-pin.md)。Expert→Skill、Team→Expert 在源资源发布/提交时冻结 `target_version_id`，读取/安装只读 pin；Connector 仍按 ID + effective。本文 01–08 为详细规格，执行以 [00-backend-delivery.md](00-backend-delivery.md) 和 #131 为准；核心 00/01/02 已按 P 改写，执行以该文 §4 为准。**05–08 客户端/REL 详细规格尚未按 P 全文改写，只可作历史参考，执行前需同步。**
 
 > **2026-10-26 整合：** GitHub 只保留 [#131](https://github.com/Mininglamp-OSS/octo-marketplace/issues/131) 作为 **octo-marketplace 唯一后端 tracking issue**；原 #132–#134 合并进 #131，#135–#137 因实现仓库是 octo-admin/web/cli/buddy 已关闭，#138 因跨仓 REL 已关闭。本文的 01–08 保留为详细规格，不再是独立 GitHub issue；执行以 [00-backend-delivery.md](00-backend-delivery.md) 和 #131 为准。
 
 > **执行基线：** `origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）；PR #139 是 draft 初始实现，未完成 #131 验收。
 
-**状态（2026-10-26）：决策已锁定，按 B 模型执行。** Expert→Skill、Team→Expert 在每次读取/安装时解析目标当前正式发布版，`target_version_id` 只作上次解析/审计值；Connector 按 ID 读 effective；A01/A03/A34/安装/审核共用一个最新解析服务，每次请求各自使用一致性快照；最新版不可用时不回退旧版。A09 restore、A29/A30 HTTP 迁移、同名/多版本共存、“曾发布即禁止删除”均已明确不做。完整口径见 [00-decisions](../00-decisions.md) 与 [2026-10-26 决策记录](../decisions-20261026.md)；本文只负责执行切片，接口语义以 [API 契约](../02-api-contracts.md) 为准，文档冲突先改 00/02 再改代码。
+**状态（2026-10-26）：决策已锁定，按 P 模型执行。** Expert→Skill、Team→Expert 在源资源发布/提交时冻结 `target_version_id`，公共读取/A01/A03/A34/安装/审核只读 pin；目标发新版不改变已发布来源，pin 不可用时不回退、不自动切换。Connector 按 ID 读 effective。同一源版本的 pin 图稳定，只有源重新发布才刷新。存量已发布资产的 pin 在切换时由 MP-04 回填。private 保持原语义（同 owner private→private 允许）。A09 restore、A29/A30 HTTP 迁移、同名/多版本共存、“曾发布即禁止删除”均已明确不做。完整口径见 [P 决策](../decisions-20261026-pin.md) 与 [2026-10-26 决策记录](../decisions-20261026.md)；本文只负责执行切片，接口语义以 [API 契约](../02-api-contracts.md) 为准（已按 P），文档冲突先改 00/02 再改代码。
 
 ## 0. 当前代码基线与 PR 映射
 
-当前基线为 `origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）。PR #139（draft，head `0c7cc1f`）已提供 CAS/effective/A34/latest graph/冻结安装等基础，但未完成 #131 的 A–D 工作流；本地 checkout 落后时先 fetch。
+当前基线为 `origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）。PR #139（draft，head `0c7cc1f`）当前是 **B 模型实现**（latest graph、A01 latest SQL、A15 批准重解析、A34 动态依赖、安装 latest），**不能按现状评审/合并**；只可复用 CAS/effective/attempt 等与依赖版本解析无关的底座，P 重做见 [00 §2](00-backend-delivery.md)。本地 checkout 落后时先 fetch。
 
 | PR | 状态 | 实际交付 | 与本方案的差距 / 处理 |
 |---|---|---|---|
 | #124 `52e4d91` | 已合入 | 版本/发布底座：快照、release/published、SemVer | 保留底座；补 `edit_revision` CAS、relations 必填、Connector effective、读投影；不补 A09/`restored_from_version_id`。 |
-| #125 `c9d2a84` | 已合入 | 引用/审核/删除保护骨架 | 保留 refs/rereview 骨架；改为浮动最新解析（`target_version_id` 仅审计）、删除保护并集（去掉曾发布总禁令）、同 owner private→private 允许、Connector observations。 |
+| #125 `c9d2a84` | 已合入 | 引用/审核/删除保护骨架 | 保留 refs/rereview 骨架；改为发布/提交冻结 pin（`target_version_id` 权威）、删除保护精确 pin、同 owner private→private 允许、Connector observations。 |
 | #126 `e7ffc79` | 已关闭，未合入 | 固定版本安装/盘点/迁移 CLI | 不作为基线；其内容由 #128 替代，不重复引入。 |
-| #127 `016baef` | 开放 | 公共列表按依赖过滤（SQL 前置/COUNT/facets） | **不按现状合并**：`dependency_issues` 旧 DTO、只诊断 pin、无 `view`/四字段/匿名聚合/editing 根。保留 SQL 前置思路，按 D4/B 重做。 |
+| #127 `016baef` | 开放 | 公共列表按依赖过滤（SQL 前置/COUNT/facets） | **不按现状合并**：`dependency_issues` 旧 DTO、无 `view`/四字段/匿名聚合/editing 根；pin 方向保留，但需按 D4/P 重做诊断、匿名与 SQL 谓词。 |
 | #128 `3467a39` | **已合入 main `eec5223`** | inline 负校验、锁前文件冻结、readiness SQL、过期回执说明 | 保留这些修复；但 main 仍含 `mk1`/pinned refs CHECK/指针回滚/直接 release 等需清理行为：MP-02 改 pin/Connector 和权限，MP-03 替换 legacy/重解析 attempt/mk1，MP-04 去掉指针回滚并补冻结授权计划，REL-01 复用/改写 readiness 与回执手册并实测。 |
 
 当前 remote 基线为 `origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）；本地 checkout 可能落后。`#126/#128` 是替代关系，不是同时合入。`mk1`/指针回滚只在 main 既有代码中，必须显式移除，不能当新能力保留。
@@ -26,19 +28,19 @@
 
 | 规格编号 | 详细说明 | 完成硬依赖 | 主要仓库 | 状态/交付 |
 |---|---|---|---|---|
-| **MP-BACKEND** | **[合并后端交付](00-backend-delivery.md)** | 无 | **octo-marketplace** | **唯一 GitHub tracking（#131）；A–D 工作流，PR139 为初始实现** |
+| **MP-BACKEND** | **[合并后端交付](00-backend-delivery.md)** | 无 | **octo-marketplace** | **唯一 GitHub tracking（#131）；A–D 工作流，PR139 为 B 实现需按 P 重做** |
 | MP-01 | [版本、发布与统一读取](01-version-publication.md) | MP-BACKEND | marketplace | 详细规格； 不可变文件/current-published/release/Connector effective/CAS 与 relations/读投影/A01 四字段 DTO 底座；无 A09 |
-| MP-02 | [浮动引用、最新解析与审核治理](02-dependency-governance.md) | MP-BACKEND | marketplace | 详细规格； 唯一最新解析服务/引用写入与矩阵/审核观察/live∪published∪Team→最新发布 Expert 间接保护/容器/候选与影响；A01 公共 SQL 过滤、COUNT/facets、mine 四字段安全诊断 |
-| MP-03 | [原子安装、A34 与安全重试](03-installation-fleet.md) | MP-BACKEND | marketplace（联调依赖现有 Fleet） | 详细规格； A31/A32/A34 唯一端点 owner；A34 单 GET 最新完整内容/一个安装引擎/同 key 原 plan/新 key 最新/状态机与 UNKNOWN；同名冲突失败 |
-| MP-04 | [CLI 转换与数据安全回滚](04-migration.md) | MP-BACKEND | marketplace | 详细规格； CLI 两次 preview/冻结 `plan_digest`/apply 只认冻结计划/映射/waiting_review/数据安全回滚；不调用 Fleet |
-| CL-01 | [Admin 接入](05-admin.md) | — | admin（外部依赖） | **GitHub #135 已关闭（非本仓库）**； schema2 ZIP-only/A25 Key+CAS+`resolved[]`/A03/A10 最新解析 + A22 精确读取/effective 读取；**Admin 无资产审核，create/update/reupload 直接生效；仅 Tenant 审核**；readiness SQL 按 B 改写或仅结构检查 |
-| CL-02 | [Web 与 CLI 接入](06-web-cli.md) | — | web、cli | **GitHub #136 已关闭（非本仓库）**； 显式引用+CAS/审核/版本读取/A34 一次最新完整内容/CLI 查询/mine 四字段标记与匿名 Tooltip/同 key 原 plan、新 key 新安装 |
-| CL-03 | [Buddy 接入](07-buddy.md) | — | buddy-client | **GitHub #137 已关闭（非本仓库）**； 单 A34 最新完整内容、无依赖补取、无 BFS/无字节改写/本地读取边界/工作空间招募与安全重试 |
-| REL-01 | [四端证据与干净切换](08-cutover.md) | — | 全部涉及仓库 | **GitHub #138 已关闭（跨仓 REL）**； 真实数据层/四端/Fleet/Daemon 证据；部署门禁使旧执行器不可达；数据安全回滚；B/A01/D4 真实证据 |
+| MP-02 | [pin 冻结、依赖图与审核治理](02-dependency-governance.md) | MP-BACKEND | marketplace | 详细规格； 唯一 `PinnedDependencyResolver`/发布冻结 pin/引用矩阵/审核观察/live∪published pin∪Team→pinned Expert 间接保护/容器/候选与影响；A01 公共 SQL pin 过滤、COUNT/facets、mine 四字段安全诊断 |
+| MP-03 | [原子安装、A34 与安全重试](03-installation-fleet.md) | MP-BACKEND | marketplace（联调依赖现有 Fleet） | 详细规格； A31/A32/A34 唯一端点 owner；A34 单 GET pin 完整内容/一个安装引擎/同 key 原 plan/新 key 按源发布快照/状态机与 UNKNOWN；同名冲突失败 |
+| MP-04 | [CLI 转换与数据安全回滚](04-migration.md) | MP-BACKEND | marketplace | 详细规格； CLI 两次 preview/冻结 `plan_digest`/apply 只认冻结计划/映射/waiting_review/数据安全回滚/存量 pin 回填；不调用 Fleet |
+| CL-01 | [Admin 接入](05-admin.md) | — | admin（外部依赖） | **GitHub #135 已关闭（非本仓库）**； schema2 ZIP-only/A25 Key+CAS+`resolved[]`/A03/A10 pin 图读取 + A22 精确读取/effective 读取；**Admin 无资产审核，create/update/reupload 直接生效；仅 Tenant 审核**；readiness SQL 按 P 改写或仅结构检查 |
+| CL-02 | [Web 与 CLI 接入](06-web-cli.md) | — | web、cli | **GitHub #136 已关闭（非本仓库）**； 显式引用+CAS/审核/版本读取/A34 一次 pin 完整内容/CLI 查询/mine 四字段标记与匿名 Tooltip/同 key 原 plan、新 key 按源发布快照新安装 |
+| CL-03 | [Buddy 接入](07-buddy.md) | — | buddy-client | **GitHub #137 已关闭（非本仓库）**； 单 A34 pin 完整内容、无依赖补取、无 BFS/无字节改写/本地读取边界/工作空间招募与安全重试 |
+| REL-01 | [四端证据与干净切换](08-cutover.md) | — | 全部涉及仓库 | **GitHub #138 已关闭（跨仓 REL）**； 真实数据层/四端/Fleet/Daemon 证据；部署门禁使旧执行器不可达；数据安全回滚；P/A01/D4 真实证据 |
 
 ```mermaid
 flowchart LR
-    MP01[MP-01 版本与读取] --> MP02[MP-02 浮动引用与解析]
+    MP01[MP-01 版本与读取] --> MP02[MP-02 pin 冻结与图读取]
     MP02 --> MP03[MP-03 原子安装与 A34]
     MP02 --> MP04[MP-04 CLI 转换]
     MP02 --> CL01[CL-01 Admin]
@@ -55,22 +57,22 @@ flowchart LR
 ## 2. 哪些先做，哪些并行
 
 1. **第一步 MP-01**：先拿到不可变版本、文件、正式发布身份、Connector effective、CAS 和读投影。此时各端可按确定 API 写类型/界面，但不得猜当前后端行为或启用新协议；本步不实现依赖解析，也不补 A09。
-2. **第二步 MP-02**：建立唯一的“最新发布解析”领域服务和共享 `refs`/审核观察/删除保护，接入 A01 公共过滤与 mine 诊断。**A01/A03/A34/安装/审核必须共用这一实现**，任何调用点不得再写第二套“最新版”判断。此步完成后，B 的读取语义才可对外启用。
+2. **第二步 MP-02**：建立唯一的“pin 图读取”领域服务（`PinnedDependencyResolver`）、发布冻结逻辑和共享 `refs`/审核观察/删除保护，接入 A01 公共过滤与 mine 诊断。**A01/A03/A34/安装/审核必须共用这一实现**，任何调用点不得再写 latest 或按目标当前发布版解析。此步完成后，P 的读取语义才可对外启用。
 3. **MP-02 之后可并行完成 MP-03、MP-04、CL-01**：安装与 A34、CLI 转换、Admin 路径相互独立；共享 policy/codec/解析器只消费，不另建同义模型。Web/CLI 的发布/读取子工作可在 MP-03 前开发，A34 完整内容与真实安装验收等 MP-03。
-4. **MP-03 之后 CL-02 和 CL-03 可并行完成**：Web/CLI 与 Buddy 独立目录，均只消费一次 A34 最新内容；不得用 A03、detail、versions、skill_md/download/files 扇出补内容。CLI/Web 同一个 Bot 发布流程归 CL-02，内部两个仓库可并行接类型、最后验证同一真实流程。
-5. **最后 REL-01**：所有前置完成才放行生产切换。不是等最后才联调：MP-01 版本 smoke、MP-02 审核/解析/A01 smoke、MP-03 A34 单 GET 全内容/错误无裁剪/零 Fleet/零写入与同 key 原 plan 重试、MP-04 CLI 冻结计划演练、各 CL 实际 surface 验证均需实现阶段证据；当前未运行。
+4. **MP-03 之后 CL-02 和 CL-03 可并行完成**：Web/CLI 与 Buddy 独立目录，均只消费一次 A34 pin 内容；不得用 A03、detail、versions、skill_md/download/files 扇出补内容。CLI/Web 同一个 Bot 发布流程归 CL-02，内部两个仓库可并行接类型、最后验证同一真实流程。
+5. **最后 REL-01**：所有前置完成才放行生产切换。不是等最后才联调：MP-01 版本 smoke、MP-02 审核/pin 图/A01 smoke、MP-03 A34 单 GET 全内容/错误无裁剪/零 Fleet/零写入与同 key 原 plan 重试、MP-04 CLI 冻结计划演练、各 CL 实际 surface 验证均需实现阶段证据；当前未运行。
 
 ## 3. 共享文件与数据所有权
 
 - **MP-01** 独占版本/release/effective/CAS 及版本文件基础、共享 codec、A01 endpoint 与 DTO 底座；不建依赖谓词、不建分发状态列、不建 A09/`restored_from_version_id`。
-- **MP-02** 顺序扩展 `plugin_relations`/`plugin_version_relation_refs`（`target_version_id` 可空、仅审计）、审核观察、`plugin_mutation_receipts`，并建立**唯一** `LatestPublishedResolver`。`content_digest` 必须排除浮动 `target_version_id` 等解析值；同 digest 但标签/受众/关系身份变化仍建新快照。
-- **A01** 唯一端点 owner 仍是 MP-01；MP-02 扩展共享 metadata 依赖谓词（公共分页/COUNT 前置，沿最新解析递归判定；Team 沿最新成员 Expert 再判 Skill/Connector），供分类 `plugin_count`、公共 tags 复用。`mode=mine` 不因依赖异常过滤，保留原 owner/Space 内非删除资产与 total，只对 Expert/Team 输出权限安全的 `dependency_availability`。不新增接口、治理状态或修改来源 `listing_state`；依赖恢复或来源发布新版本后下一次查询重算，无推送/轮询。
-- **A34** 由 MP-03 独占 HTTP/DTO/完整内容组装，但解析必须调用 MP-02 的同一 resolver，并在同一一致性快照内完成；MP-02 不实现第二个 A34，也不得让安装/审核另写解析。A34 的 `bundle_digest` 在 B 下随最新依赖动态变化。
-- **删除保护**（MP-02）统一为并集：live incoming（active 来源、未删除、不过滤 listing、含草稿）∪ published refs（按 `target_plugin_id`）∪ Team→最新发布 Expert→Skill/Connector 间接引用；**没有“曾发布即禁止删除”总禁令**。只改删除，不改已发布资源收窄 visibility 的现有行为；引用式来源删除只删自身及自身关系，不删共享目标。
-- **依赖矩阵**（MP-02）：system 仅引用已发布 system；space 仅引用已发布 system 或同 Space 的 space；同 owner private→private 允许；space/system 不得引用 private；跨 Space 禁止；Admin 可见不绕过。最新解析依赖下架/删除/缺失时，Expert/Team 公共隐藏且 A34/安装整体失败；owner 只能看到 mine 诊断，不能安装坏图。不新增下架依赖安装豁免，不回退旧版。
+- **MP-02** 顺序扩展 `plugin_relations`/`plugin_version_relation_refs`（草稿 `target_version_id` 可空，已发布快照必填并冻结）、审核观察、`plugin_mutation_receipts`，并建立**唯一** `PinnedDependencyResolver`。`content_digest` **不含 pin**（草稿为空、发布补齐）；同 digest 但标签/受众/关系身份/显式 pin 变化仍建新快照；存量缺 pin 由 MP-04 回填，读取时不懒补。
+- **A01** 唯一端点 owner 仍是 MP-01；MP-02 扩展共享 metadata 依赖谓词（公共分页/COUNT 前置，沿源快照 pin 判定；Team 沿 pinned 成员 Expert 版本再判 Skill/Connector），供分类 `plugin_count`、公共 tags 复用。`mode=mine` 不因依赖异常过滤，保留原 owner/Space 内非删除资产与 total，只对 Expert/Team 输出权限安全的 `dependency_availability`。不新增接口、治理状态或修改来源 `listing_state`；pin 恢复或来源重新发布后下一次查询重算，无推送/轮询。
+- **A34** 由 MP-03 独占 HTTP/DTO/完整内容组装，但解析必须调用 MP-02 的同一 resolver，并在同一一致性快照内完成；MP-02 不实现第二个 A34，也不得让安装/审核另写解析。A34 的 `bundle_digest` 对同一源版本稳定，目标发新版不改变。
+- **删除保护**（MP-02）统一为并集：live incoming（active 来源、未删除、不过滤 listing、含草稿）∪ published refs（精确 pin，保护目标 plugin 与 pin 版本）∪ Team→pinned 成员 Expert 版本→其 pin refs 间接引用；**没有“曾发布即禁止删除”总禁令**。只改删除，不改已发布资源收窄 visibility 的现有行为；引用式来源删除只删自身及自身关系，不删共享目标。
+- **依赖矩阵**（MP-02）：system 仅引用已发布 system；space 仅引用已发布 system 或同 Space 的 space；同 owner private→private 允许；space/system 不得引用 private；跨 Space 禁止；Admin 可见不绕过。pin 依赖下架/删除/缺失时，Expert/Team 公共隐藏且 A34/安装整体失败；owner 只能看到 mine 诊断，不能安装坏图。不新增下架依赖安装豁免，不回退目标新版/旧版。
 - **CL-02** 拥有 Web wire/domain 类型与全部/专家/专家团 tab 的 `MineRow/MineTable` 标记、固定 reason i18n 和 hover/键盘 focus Tooltip；全部 tab 的 `getMySkills` 跨类型通路不可遗漏，不在前端过滤或扇出查依赖/A34。
 - **MP-04** 只扩展 `plugin_mutation_receipts` 的 operation 使用并创建 migration map；CL-01 不建后端表。MP-04 与 MP-03 并行期间不得同时改同一 policy 算法；安装结果对比在 REL-01 验证。
-- **MP-03** 独占 A31/A32/A34 端点、DTO、完整内容读取组装，以及 attempt/plan 和网络安全重试；复用 MP-01 文件与 MP-02 resolver，抽出不依赖 Runtime/Workspace/Secret 的内容组装。A31/A32 共用唯一 `InstallCoordinator`；A32 保留 URL、不保留旧行为；删除市场 legacy create/bind/delete 补偿。客户端只保存无 Secret 防重复/人工核对元数据，不增加远端结果查询，不修改 Fleet receipt/action/cleanup/过期重占。
+- **MP-03** 独占 A31/A32/A34 端点、DTO、完整内容读取组装，以及 attempt/plan 和网络安全重试；复用 MP-01 文件与 MP-02 pin resolver，抽出不依赖 Runtime/Workspace/Secret 的内容组装。A31/A32 共用唯一 `InstallCoordinator`；A32 保留 URL、不保留旧行为；删除市场 legacy create/bind/delete 补偿。客户端只保存无 Secret 防重复/人工核对元数据，不增加远端结果查询，不修改 Fleet receipt/action/cleanup/过期重占。
 - **CL-03** 只拥有 Buddy 主进程 adapter、最小无 Secret pending 记录、IPC 类型与现有 UI 状态；完整内容只消费一次 A34，删除 BFS 补取与 `normalizeMarketplaceSkillMarkdown`/ZIP 补文件等字节改写；不改 Fleet/Daemon。
 - **同名/多版本**：本期拒绝共存，同名不同内容安装冲突失败；普通安装保留市场原名/原字节；不生成 `mk1` 别名、不改写 `SKILL.md` frontmatter、不改目录名、不改 Fleet/Daemon。
 - OpenAPI 生成物由每个实际端点 owner 同步；前端不手写第二份服务端规范。CL-02 安装部分依 MP-03，不能先发布读写部分就宣布整个 issue 完成。

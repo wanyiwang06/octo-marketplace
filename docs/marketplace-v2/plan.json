@@ -1,40 +1,38 @@
 {
   "schema_version": "1.1",
-  "status": "consolidated_backend_pending_implementation",
+  "status": "consolidated_backend_pending_p_rework",
   "contract": "02-api-contracts.md",
   "decisions": {
     "decided_at": "2026-10-26",
     "authority": "00-decisions.md",
+    "revision_authority": "decisions-20261026-pin.md",
     "user_record": "decisions-20261026.md",
-    "reference_model": "B",
+    "reference_model": "P",
+    "supersedes": "B",
     "summary": {
-      "B": "Expert→Skill、Team→Expert 每次读取/安装解析目标当前正式发布版（status=1、未删除、listing_state=published）；Connector 按 ID 读 effective；target_version_id 仅作上次解析/审计值；A01/A34/安装/审核共用一个最新解析服务，每次请求各自使用一致性快照；最新版不可用时不回退旧版。",
-      "D1": "保留原删除能力；删除保护 = live incoming（含草稿、不过滤 listing）∪ published refs ∪ Team→最新发布 Expert→Skill/Connector 间接引用；不新增“曾发布即禁止删除”，只改删除、不改已发布资源收窄 visibility 的现有行为。",
+      "P": "Expert→Skill、Team→Expert 在源资源共享发布时冻结 target_version_id，已发布快照 pin 为权威；草稿可空，发布动作解析并冻结缺失 pin，显式 pin 必须校验归属与 official release；Connector 关系 target_version_id 必须 NULL，仍按 ID 读 effective；公共读取/A01/A03/A34/安装/审核只读 pin，目标发新版不改变已发布来源，pin 不可用时不回退、不自动切换；同一源版本 pin 图与 A34 bundle_digest 稳定；只有源重新发布才刷新 pin。",
+      "D1": "保留原删除能力；删除保护 = live incoming（含草稿、不过滤 listing）∪ published refs（精确 target_version_id pin，保护目标 plugin 与 pin 版本）∪ Team→pinned 成员 Expert 版本→其 pin refs 间接引用；下架 pin 目标不自动解保护；不新增“曾发布即禁止删除”，只改删除、不改已发布资源收窄 visibility 的现有行为。",
       "D2": "不做 A09 restore-to-draft；A09 从 MP-01/API/plan/CL-02 删除，不引入 restored_from_version_id；历史读取 A04–A08 保留。",
       "D3": "不允许同名/多版本共存；同名不同内容冲突失败；普通安装保留市场原名/原字节；不改 SKILL.md frontmatter、不生成 mk1 别名、不改 Fleet/Daemon。",
-      "D4": "A01 mine 的 Expert/Team 必返 dependency_availability 四字段（status/evaluated_view/evaluated_version_id/reasons）；evaluated 指来源自己的 published/editing；target.version_id 为本次解析到的最新版本；reason code 固定三种；无权依赖匿名；view 规则与 SQL COUNT/facets 同口径；mine/Admin 保留管理范围。",
-      "D5": "生产迁移用 CLI + 离线授权，不做 A29/A30 HTTP；CLI 两次只读 preview 并冻结 plan_digest；apply 只认冻结计划；新版本走既有审核（waiting_review）；回滚必须数据安全（不恢复 current/published 指针）。 离线授权采用 02 §5.1 Ed25519/JCS 制品，验证主体/环境/有效期/撤销；续签仅恢复同计划同批次原 run。",
-      "D6": "同 owner private→private 允许；space/system 不得引用 private；最新解析依赖下架/删除 => Expert/Team 公共隐藏且 A34/安装失败；owner 只能看诊断，不能安装坏图。",
-      "D7": "Admin 不用审核，直接写入同步 effective；Tenant 沿用既有审核策略；审核观察变化 409 后取消旧申请并重新提交新审核；A34/安装读 effective。",
+      "D4": "A01 mine 的 Expert/Team 必返 dependency_availability 四字段（status/evaluated_view/evaluated_version_id/reasons）；evaluated 指来源自己的 published/editing；target.version_id 为 pin（草稿空 pin 省略）；reason code 固定三种；无权依赖匿名；view 规则与 SQL COUNT/facets 同口径；mine/Admin 保留管理范围。",
+      "D5": "生产迁移用 CLI + 离线授权，不做 A29/A30 HTTP；CLI 两次只读 preview 并冻结 plan_digest；apply 只认冻结计划；新版本走既有审核（waiting_review）；回滚必须数据安全（不恢复 current/published 指针）。生产切换时对现有已发布 Expert/Team 执行 pin 回填：已有合法 pin 保留，缺失/无效冻结到迁移时目标当前正式发布版，无可冻结版本则 blocked；回填在离线授权/冻结计划下执行，禁止读取时懒回填。离线授权采用 02 §5.1 Ed25519/JCS 制品，验证主体/环境/有效期/撤销；续签仅恢复同计划同批次原 run。",
+      "D6": "同 owner private→private 允许（private Expert→同 owner private Skill、private Team→同 owner private Expert 为合法主路径）；space/system 不得引用 private；pin 依赖下架/删除/失去 release => Expert/Team 公共隐藏且 A34/安装失败；owner 只能看诊断，不能安装坏图。",
+      "D7": "Admin 不用审核，直接写入同步 effective；Tenant 沿用既有审核策略；审核观察变化 409 后取消旧申请并重新提交新审核；A34/安装读 effective；Connector 无业务版本 pin。",
       "D8": "edit_revision + expected_edit_revision：更新必带、新建省略，缺失/过期 409 edit_conflict；relations 必填数组，缺失/null 400；Admin/Web/CLI/Bot 四端同批改。",
-      "D9": "A31/A32 保留 URL、共用同一 InstallCoordinator/attempt；同 key 只重放首次冻结 plan；显式安装输入变化返回 409；上游正常发新版不阻断原 key 重试，新 key 新安装才解析最新；状态机含 UNKNOWN；仅首次成功计数。",
+      "D9": "A31/A32 保留 URL、共用同一 InstallCoordinator/attempt；同 key 只重放首次冻结 plan；显式安装输入变化返回 409；目标发新版不改变 pin 也不阻断原 key 重试；新 key 按当前源发布快照重新读取 pin 图，不按目标 latest；状态机含 UNKNOWN；仅首次成功计数。",
       "D10": "新改造完成后旧市场执行器不可达；回滚接受兼容二进制 + 从历史生成新版本恢复；不恢复指针/legacy，不删历史/对象/attempt。",
-      "review": "沿用现有 Space 策略：默认自动审核（plugin_review_policies），Space 可关；自动模式内部重试一次；人工模式审核窗口依赖变化才 409；批准后依赖继续浮动，依赖发新版不要求重新审核引用方。 人工冲突不刷新旧观察值：按原权限取消后重提新 review_id；Admin 不审核。"
-    },
-    "removed": {
-      "A09": "restore-to-draft 明确不做。",
-      "A29": "legacy_import/preview HTTP 明确不做，改 CLI 冻结计划。",
-      "A30": "legacy_import/apply HTTP 明确不做，改 CLI apply。",
-      "same_name_coexistence": "同名/多版本共存本期拒绝，不是 deferred；同名不同内容安装冲突失败。",
-      "ever_published_delete_ban": "不存在“曾发布即禁止删除”的总禁令。"
+      "review": "沿用现有 Space 策略：默认自动审核（plugin_review_policies），Space 可关；自动模式内部重试一次；人工模式提交冻结 pin/Connector effective，批准只校验 pin 版本仍 official release、目标可用、effective 未变；目标发新版不构成 dependency_changed；批准后 pin 不变；人工冲突不刷新旧观察值：按原权限取消后重提新 review_id；Admin 不审核。"
     }
   },
   "confirmed_scopes": [
-    "b_model_latest_published_resolution_at_read_and_install",
-    "relation_target_version_id_audit_only",
-    "single_latest_resolver_shared_by_a01_a34_install_review",
-    "consistent_snapshot_per_request_no_old_version_fallback",
-    "independent_market_assets_referenced_by_id_not_authoritative_version",
+    "p_model_publish_time_pinned_dependencies",
+    "relation_target_version_id_authoritative_in_published_snapshot",
+    "draft_target_version_id_nullable_frozen_on_publish",
+    "connector_relation_target_version_id_null",
+    "published_snapshot_requires_pin",
+    "single_pinned_graph_resolver_shared_by_a01_a03_a34_install_review",
+    "stable_pin_graph_per_source_version_no_latest_or_old_version_fallback",
+    "independent_market_assets_referenced_by_id_plus_pin",
     "admin_zip_only_dependency_maintenance",
     "existing_fleet_idempotent_network_retry",
     "market_definitions_separate_from_local_and_workspace_composition",
@@ -42,13 +40,14 @@
     "same_owner_private_dependency_allowed",
     "reuse_existing_publication_review_roles_and_policy",
     "reuse_existing_market_actions_no_lifecycle_expansion",
-    "delete_protection_union_no_ever_published_ban",
+    "delete_protection_exact_pins_no_ever_published_ban",
     "connector_effective_model_with_review_observations",
     "edit_revision_cas_and_required_relations",
-    "single_request_complete_latest_plugin_content",
+    "single_request_complete_pinned_plugin_content",
     "market_dependency_filter_with_owner_diagnostics",
-    "install_single_engine_same_key_original_plan_new_key_latest",
+    "install_single_engine_same_key_original_plan_new_key_source_snapshot",
     "stock_migration_cli_with_frozen_plan",
+    "stock_published_pin_backfill_with_blocked_roots",
     "four_client_a34_and_mine_dependency_diagnostics",
     "no_same_name_coexistence_no_mk1_frontmatter_rewrite",
     "no_a09_restore_no_a29_a30_http",
@@ -75,7 +74,7 @@
     {
       "id": "ever_published_delete_ban",
       "status": "rejected",
-      "reason": "D1：删除保护按 live incoming ∪ published refs ∪ Team→最新发布 Expert→Skill/Connector 间接引用并集判定，不新增曾发布总禁令。"
+      "reason": "D1：删除保护按 live incoming ∪ published 精确 pin refs ∪ Team→pinned 成员 Expert 版本→其 pin refs 并集判定，不新增曾发布总禁令。"
     }
   ],
   "external_api_ids": [
@@ -137,7 +136,22 @@
         "plugin_dependency_migration_runs",
         "plugin_migration_authorizations"
       ],
-      "description": "唯一 octo-marketplace 后端 tracking issue。A：版本/CAS/effective/读投影；B：refs/latest/A01/A15/删除治理；C：A34/统一安装；D：MP-04 CLI 迁移/离线授权/数据安全回滚。PR139 为 draft 初始实现，已知缺口见 issues/00-backend-delivery.md §2；客户端 #135–#137 与跨仓 REL #138 已关闭，不在本 issue。"
+      "description": "唯一 octo-marketplace 后端 tracking issue。A：版本/CAS/effective/读投影与发布冻结 pin；B：pin 图/refs/A01/A15/删除精确 pin；C：A34/统一安装按 pin；D：MP-04 CLI 迁移/离线授权/数据安全回滚/存量 pin 回填。PR139 为 B 模型实现，需按 P 重做（见 issues/00-backend-delivery.md §2）；客户端 #135–#137 与跨仓 REL #138 已关闭，不在本 issue。",
+      "slices": [
+        "A 版本不可变/CAS/Connector effective/读投影，以及发布/提交冻结缺失 pin 的事务边界",
+        "B pin 冻结与 refs、PinnedDependencyResolver、A01 pin 可用性/四字段、A15 pin 观察、删除精确 pin",
+        "C A34 pin 完整内容、A31/A32 统一安装、同 key 原 plan/新 key 源快照、UNKNOWN/租约",
+        "D MP-04 CLI 冻结计划/离线授权/数据安全回滚、存量已发布 pin 回填（blocked 根）"
+      ],
+      "acceptance": [
+        "Expert→Skill、Team→Expert 在发布/提交时冻结 target_version_id；草稿可空；已发布快照 pin 必填且为权威；Connector 关系 NULL",
+        "显式 pin 必须属于目标且 official release；发布/提交补齐缺失 pin；对已 release 同一源版本重复发布不刷新 pin",
+        "A01/A03/A34/安装/审核只读 pin；目标发新版不影响；pin 失效时隐藏/失败，不回退 latest 或旧版",
+        "A15 批准只校验 pin/effective；目标发新版不 409，只有 pin 失效/目标不可用/effective 漂移 409 dependency_changed",
+        "删除保护按 live incoming ∪ published 精确 pin ∪ Team→pinned Expert 版本 refs；无曾发布禁删；pinned 目标版本/plugin 受保护",
+        "存量已发布 Expert/Team cutover 回填 pin：合法保留、缺失冻结当前正式发布版、无可冻结版本 blocked；禁止读取懒回填",
+        "PR #139 的 B 实现（latest resolver/A01 latest SQL/A15 重解析/A34 动态依赖/安装 latest）被 P 替换后方可验收"
+      ]
     }
   ],
   "api_catalog_ids": [
@@ -174,7 +188,7 @@
   "cutover_issue": "MP-BACKEND",
   "runtime_fallbacks_allowed": false,
   "latest_version_fallback_allowed": false,
-  "review_revision": "2026-10-26-five-groups",
+  "review_revision": "2026-10-26-pin",
   "implementation_verified": false,
   "baseline": {
     "observed_at": "2026-10-26",
@@ -190,7 +204,7 @@
     "open_prs": [
       127
     ],
-    "note": "本轮重新查询 GitHub/fetch；PR127 尚未合入，不作为已交付能力。"
+    "note": "本轮重新查询 GitHub/fetch；PR127 尚未合入，不作为已交付能力。PR139 为 B 模型实现，与 P 冲突，需整体重做。"
   },
   "table_ownership_note": "保留 schema 1.1 的 owns_new_tables 字段名以兼容消费者；它列出本方案表职责，不表示基线已有表需要重建。按实际合并状态复用并提交增量 DDL。",
   "superseded_issues": {

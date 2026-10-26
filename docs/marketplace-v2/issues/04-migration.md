@@ -1,10 +1,12 @@
-# MP-04 · CLI 冻结计划驱动的历史资产转换与数据安全回滚（B 模型）
+# MP-04 · CLI 冻结计划驱动的历史资产转换、pin 回填与数据安全回滚（P 模型）
 
-> 决策依据：[00-decisions](../00-decisions.md) D5（CLI + 离线授权、两次 preview/冻结 `plan_digest`、apply 只认冻结计划、数据安全回滚、不做 A29/A30 HTTP）、B 模型（迁移生成引用式资源，按目标 ID 引用、读时解析最新，不伪造 pin）、D6（private/受众）、D10（不恢复指针/legacy）。本文是本地 issue 草案，不表示已创建远程 issue。
+> **2026-10-26 权威修订：P 模型（上架冻结依赖）取代 B 模型。** 权威文档：[decisions-20261026-pin.md](../decisions-20261026-pin.md)。迁移生成“引用式 + 上架 pin”的资源，并在生产切换时对既有已发布 Expert/Team 执行一次 pin 回填；公共读取/A34/安装只读 pin，不解析 latest。
+>
+> 决策依据：P 决策与存量回填默认；D5（CLI + 离线授权、两次 preview/冻结 `plan_digest`、apply 只认冻结计划、数据安全回滚、不做 A29/A30 HTTP）、D6（private/受众）、D10（不恢复指针/legacy）。本文是本地 issue 草案，不表示已创建远程 issue。
 
 ## 目标（Goal）
 
-把旧 embedded Skill、inline MCP、embedded member 转换为独立资产引用；其中 Skill/Expert 必须成为所属 system/Space 市场中独立可见、可引用的正式资产，不能只做后台拆表后继续隐藏。在一个交付切片内闭合 inventory、两次只读 preview、人工批准冻结计划、apply、映射、幂等、CAS、审核等待和中断恢复。
+把旧 embedded Skill、inline MCP、embedded member 转换为独立资产引用；其中 Skill/Expert 必须成为所属 system/Space 市场中独立可见、可引用的正式资产，不能只做后台拆表后继续隐藏。在一个交付切片内闭合 inventory、两次只读 preview、人工批准冻结计划、apply、映射、幂等、CAS、审核等待和中断恢复；并在生产切换时完成现有已发布 Expert/Team 的 pin 回填。
 
 **生产迁移只经 CLI + 离线授权完成，不新增 A29/A30 HTTP。** 硬依赖：[MP-02](02-dependency-governance.md)，并传递依赖 MP-01；复用版本、正式发布证据、文件快照、依赖策略和统一锁序。可并行协作：与 MP-03、CL-01、CL-02 并行；向 REL-01 提供计划、迁移映射和对比基线。编码与域内验收不依赖 MP-03，不调用 Fleet。
 
@@ -12,7 +14,7 @@
 
 D5 已确认：生产路径为 `marketplace-stock-migration` CLI + 离线授权（复用/演进现有 `cmd/marketplace-stock-migration` + `internal/backfill/stockmigration` 及其 `plugin_stock_migration_batches/roots`，不新增第二个迁移 CLI）；两次只读 preview——首次 discovery（来源 inventory、候选、关系、缺失选择），第二次冻结（显式标签/映射/Connector server 分组/归属）并写 `plan_digest`；apply 只认人工批准的冻结计划，不接受手改摘要。生产迁移仍需人工批准计划，CLI 不是绕过授权。旧 `--apply`/`--rollback`/`--g4...` 行为按下文退役，不能作为新迁移旁路。
 
-B 模型下迁移产物是引用式资源：Expert→Skill、Team→Expert 存目标 ID，`target_version_id` 至多作审计；公共/A34/安装读时解析目标最新发布版。迁移不生成权威 pin、不把当前最新写成不可变依赖、不做自动 latest 猜测；历史 pin 仅作证据保留。
+P 模型下迁移产物是“引用式 + 上架 pin”的资源：Expert→Skill、Team→Expert 存目标 ID，发布/提交时冻结 `target_version_id`；公共/A34/安装只读该 pin，不解析目标最新版。迁移不把“迁移时目标最新”变成读时 latest，也不在普通读取时懒回填。存量已发布资产的 pin 由迁移 CLI 在生产切换时回填（见“存量 pin 回填”）。
 
 回滚必须数据安全：不删表/不删文件/不覆盖旧快照；不把 `current_version_id/published_version_id` 改回旧值；需要停止新分发时用下架/部署隔离；内容恢复从旧历史生成新版本（forward-fix）；保留 batch/mapping/attempt/audit。
 
@@ -21,7 +23,7 @@ B 模型下迁移产物是引用式资源：Expert→Skill、Team→Expert 存�
 1. **CLI-only、离线授权。** 不注册 `POST /admin/plugins/legacy_import/preview`、`POST /admin/plugins/legacy_import/apply` 或任何替代 HTTP；不把 CLI 包装成 Admin 后门。离线授权制品绑定 `plan_digest`、操作者、来源范围与执行批次，由有权者签发；apply 校验授权与计划一致，二者任一不符即拒绝。授权制品格式、Ed25519/JCS 签名、部署信任配置、主体校验、有效期、撤销和续签恢复固定按 02 §5.1；不得退化为口令或可手改的明文标记。**在现有 `marketplace-stock-migration` 上演进：删除/禁用旧 `--rollback` 指针回滚、直接 `INSERT plugin_version_releases`、`--g4-stop-on-exceptions-approved` 自证批准及固定 pin；生产上撤销旧 DSN/DB 账号权限并移除/deny 旧构建，使旧 `--all-spaces --apply` 不能执行；旧 `plugin-backfill` 退役，不作为 inventory/apply 旁路。由 REL-01 验证旧 plugin-backfill 与旧 marketplace-stock-migration 构建/模式都不可写。**
 2. **两次只读 preview。** 第一次 discovery 只读来源并输出 inventory/候选/缺失项；操作者补全后，第二次以同一来源重验并输出冻结的完整计划与 `plan_digest`。两次都不写业务对象、审核、映射、对象存储或 receipt；第一次建议不等于批准。
 3. **apply 只认冻结计划。** apply 精确提交第二次 preview 的冻结计划、`plan_digest`、非空来源身份和离线授权；任何映射/范围/标签/关系/server 分组改动都必须重新 preview。禁止手改计划后沿用原摘要；禁止 apply 自行替换标签或补 latest。
-4. **B 引用。** 新建/复用的 Expert、Team 关系以目标 ID 表达，`target_version_id` 可空、仅审计；不使用历史 pin 作为公共/安装解析依据。迁移完成后依赖跟随目标最新发布版，代价（不同时间读取/安装可能不同）写入交付说明。
+4. **P 引用与 pin 冻结。** 新建/复用的 Expert、Team 关系以目标 ID 表达；发布/提交时由统一发布流水线把缺失 `target_version_id` 解析为当时目标当前正式发布版并冻结，显式版本必须是 official release 且归属正确。迁移产物按 pin 读取，迁移完成后目标发新版不改变已迁移来源；只有来源重新发布才刷新 pin。**存量回填：** 生产切换时对现有已发布 Expert/Team 执行一次 pin 冻结；已有合法 pin 且仍 official release 保留，缺失/无效冻结到迁移时目标当前正式发布版，找不到可冻结版本则 `blocked`，不静默取 latest/旧版。
 5. **create/reuse/update_source。** 数据库根用 `update_source` 保持原 Plugin ID；ZIP 根用 `create`；子节点 `create` 或明确 `reuse`；不自动按名称/摘要猜复用，不预填假 ID/latest。新节点标签/范围/关系/引用由冻结计划显式给出，父节点从 map 取真实目标 ID。
 6. **Connector。** 默认保留原 server 集合映射到一个 Connector；只有冻结计划显式拆分才拆，server key 不重复/不丢；Connector 无业务 Version，审核用 `effective_revision/digest` 观察值；计划只存 server 身份/脱敏 fingerprint 与经授权的配置来源，不存 Secret。
 7. **审核。** CLI 生成的新版本走现有发布/审核：默认自动可自动批准；人工模式 run 为 `waiting_review`；CLI run 状态 `completed|waiting_review|blocked`；不直接插 release 绕过审核，不自动重提已拒绝审核。批准后依赖继续浮动；Skill/Expert 发新版不要求重新审核引用方。
@@ -31,7 +33,7 @@ B 模型下迁移产物是引用式资源：Expert→Skill、Team→Expert 存�
 
 ## 非目标（Out of scope）
 
-自动生产迁移、A29/A30 HTTP、跨范围公开、猜测 MCP 映射、修改原历史、补 latest pin、共享目标级联删除、实现安装器、支持二进制、自动改写硬编码路径、A09 restore、同名共存改造、Fleet/Daemon 改造。纯本地 Expert/Skill 不属于本次市场迁移。
+自动生产迁移、A29/A30 HTTP、跨范围公开、猜测 MCP 映射、修改原历史、读取时懒补 pin/自动 latest、共享目标级联删除、实现安装器、支持二进制、自动改写硬编码路径、A09 restore、同名共存改造、Fleet/Daemon 改造。纯本地 Expert/Skill 不属于本次市场迁移。
 
 ## 源码路径与所有权
 
@@ -46,26 +48,35 @@ B 模型下迁移产物是引用式资源：Expert→Skill、Team→Expert 存�
 - 交付一组只读/写入边界清晰的 CLI 操作（命令名与参数以实现时确认为准）：`inventory`（只读来源、输出脱敏清单与发布证据）、`preview --discover`（第一次只读，输出候选/缺失）、`preview --freeze`（第二次只读，返回冻结计划与 `plan_digest`）、`apply`（只接受冻结计划+摘要+离线授权；run 由 `(source_scope,source_identity,plan_digest,root_node_key=root)` 仲裁，**无幂等键参数**）、`verify`（核对新图/文件/发布资格/独立可见）、`resume --run-id <run_id> --authorization <authorization.json>`（按 run/map 恢复未提交步骤）。不新增 HTTP 路径、Admin 按钮或响应包络。
 - `inventory` 与索引核对由 CLI 提供；preview/apply 调用同一转换领域服务，不能成为绕过 Admin 鉴权、批准计划和审计的后门。已有命令的 `-migrate`、普通 `-mode apply` 或旧 phase 不构成本次数据迁移批准，不能在服务启动/DDL 执行时顺带转换。
 - 来源身份：数据库 `plugin_id@version_id`；ZIP 原字节 SHA-256（本期可只支持数据库来源；ZIP 仅在另行授权后启用并作为**条件验收**，不进入数据库来源的完成门槛）。数据库来源要求 current Version 和 `expected_edit_revision`，ZIP 来源无伪造 Plugin/Version/CAS。
-- 冻结计划至少包含：来源身份/`input_digest`、每个 `source_node_key` 的 create/reuse/update_source、显式目标 ID（reuse）、新标签/分类/受众、完整引用关系（目标 ID，版本仅审计）、Connector server 分组、逐节点依赖顺序、`plan_digest`。apply/resume 都必须校验 `source_scope`/`source_identity`/`plan_digest` 与授权一致；run 仲裁再绑定 `root_node_key=root`，任一不符即拒绝。apply 用 JCS/稳定排序重新计算 `plan_digest` 并校验冻结计划；任何不一致返回 `plan_stale` 并非零退出/保持 `blocked`，不静默重选目标。**apply 时 Connector reuse 的 `target_effective_revision/digest` 漂移也记 `plan_stale`；审核窗口的 `dependency_changed` 不是 apply 错误。**
+- 冻结计划至少包含：来源身份/`input_digest`、每个 `source_node_key` 的 create/reuse/update_source、显式目标 ID（reuse）、新标签/分类/受众、完整引用关系（目标 ID + pin/可空草稿）、Connector server 分组、逐节点依赖顺序、`plan_digest`。apply/resume 都必须校验 `source_scope`/`source_identity`/`plan_digest` 与授权一致；run 仲裁再绑定 `root_node_key=root`，任一不符即拒绝。apply 用 JCS/稳定排序重新计算 `plan_digest` 并校验冻结计划；任何不一致返回 `plan_stale` 并非零退出/保持 `blocked`，不静默重选目标。**apply 时 Connector reuse 的 `target_effective_revision/digest` 漂移也记 `plan_stale`；审核窗口的 `dependency_changed` 不是 apply 错误。**
 - 错误与结果使用 CLI 结构化输出（脱敏）：`completed|waiting_review|blocked`、逐源/逐节点已提交结果、`run_id`、`plan_digest`、安全 reason。`plan_stale`（计划/摘要/映射/范围/来源/复用观察漂移）和 `authorization_invalid`（签名/主体/环境/范围/有效期/撤销不符）均非零退出并保持 `blocked`，**不使用 HTTP 409**；不得输出 Secret/Token/原始 mcp.json。
 
 ## 实施步骤
 
 1. **只读 inventory。** 按类型、owner、Space、visibility、embedded 图和来源版本归集，记录文件可取性/完整摘要、发布证据及异常 reason。不得把无展示位当成 embedded，不得把 current 非空当成已发布。
-2. **核实发布身份。** 仅采信可审计 approved review、Admin 正式发布等证据；为旧资源记录证据引用和判定。无法证明正式发布的历史保留原文，不伪造 release、历史 pin 或关系索引，不允许直接进入新分发。
+2. **核实发布身份。** 仅采信可审计 approved review、Admin 正式发布等证据；为旧资源记录证据引用和判定。无法证明正式发布的历史保留原文，不伪造 release、旧发布 pin 或关系索引；P 回填只写本次冻结证据，不允许直接进入新分发。
 3. **第一次 preview（discovery）。** 对 ZIP 校验路径、软链接、文本编码和文件预算；对数据库来源冻结 current Version、edit_revision 与完整 `input_digest`；递归枚举 Team 内嵌 Expert 及这些 Expert 内嵌 Skill，输出每个源节点的目标候选、独立市场展示归属、差异、阻断原因和依赖顺序。`source_node_key` 在相同来源内稳定、唯一，包含唯一 root；同内容也不能因按名称/摘要去重丢失两个不同来源节点或成员关系。摘要覆盖完整文件与关系，不仅比较 `plugin_hash`；旧 `skill/ref.json`/ZIP 外部正文须在受控读取后冻结真实全部字节，不能把历史 stub 当完整 Skill。
-4. **形成批准映射（仍只读）。** Skill 候选需内容/附件字节及范围一致且 standalone、具备正式发布版本；Expert 候选还必须包含规范化 Skill 引用与 Connector 身份图。唯一候选也只建议，不自动选中；复用明确 target Plugin（Version 仅审计），新建节点的标签、范围、完整关系及引用 create 输出的 `source_node_key` 按冻结计划固定，父节点在步骤提交后从 map 取得真实目标 ID，不预填假 ID 或 latest。批准前完整覆盖所有枚举节点，不能遗漏、增加图外节点或把嵌套 Skill 藏进成员附件。
-   - 精确使用 API §5 的 `MigrationPlanResource/Relation` 语义（CLI 复用同一 schema）：数据库根为 `update_source`、ZIP 根为 `create`，子节点仅 `create/reuse`；`origin_node_key` 标识原节点，MCP 合法拆组须完整 server 覆盖，不能新增图外能力。根仍为原 Plugin，不为“来源切换”另建一个根。新建标签和分类、复用目标 ID/Connector effective 观察值全部进入第二次 preview 冻结计划；`target_version_id` 如出现仅作审计，不作为依赖权威。**reuse 的版本化目标不因旧审计版本内容变化而改变解析（读取仍按最新发布），但 apply 必须重验目标身份/资格；Connector reuse 的 `target_effective_revision/digest` 漂移返回 `plan_stale`。**
+4. **形成批准映射（仍只读）。** Skill 候选需内容/附件字节及范围一致且 standalone、具备正式发布版本；Expert 候选还必须包含规范化 Skill 引用与 Connector 身份图。唯一候选也只建议，不自动选中；复用明确 target Plugin（目标版本在发布时按 P 冻结，冻结计划可显式给 pin），新建节点的标签、范围、完整关系及引用 create 输出的 `source_node_key` 按冻结计划固定，父节点在步骤提交后从 map 取得真实目标 ID，不预填假 ID 或 latest。批准前完整覆盖所有枚举节点，不能遗漏、增加图外节点或把嵌套 Skill 藏进成员附件。
+   - 精确使用 API §5 的 `MigrationPlanResource/Relation` 语义（CLI 复用同一 schema）：数据库根为 `update_source`、ZIP 根为 `create`，子节点仅 `create/reuse`；`origin_node_key` 标识原节点，MCP 合法拆组须完整 server 覆盖，不能新增图外能力。根仍为原 Plugin，不为“来源切换”另建一个根。新建标签和分类、复用目标 ID/pin、Connector effective 观察值全部进入第二次 preview 冻结计划；`target_version_id` 可显式给出（必须是 official release 且归属正确），省略时提交/发布冻结到目标当前正式发布版，最终随发布成为权威 pin。**reuse 的版本化目标在发布时冻结 pin；apply 必须重验目标身份/资格及显式 pin 仍合法；Connector reuse 的 `target_effective_revision/digest` 漂移返回 `plan_stale`。**
 5. **处理 MCP。** inventory 只输出脱敏 descriptor fingerprint 与 server key/transport 等非敏感描述；不按 URL、名称或 fingerprint 自动指定 Connector。人工选择已有有效 Connector 或批准从可信配置创建；映射仅固定 Connector ID，不制造业务 Version。**新 Connector（旧 inline MCP）按来源既有策略处理：system 由 Admin 直接写入并同步 effective（无 pending review）；space/Tenant 走既有审核，人工模式 run 记 `waiting_review`，以 `effective_revision/digest` 作为批准观察值，不直接写 effective 绕过审核。**
 6. **处理多 server。** 默认保持原 server 集合并映射到一个 Connector；拆成多个 Connector 必须逐项获批准，完整 server 归组进入冻结计划及摘要，核对原集合完整覆盖。最终 server key 重复、遗漏、额外未批准能力或配置来源不明均阻断，不能以覆盖/清空修复；计划只保存 server 身份/脱敏 fingerprint 及经授权的配置来源，不保存配置 Secret。
 7. **核验范围授权与独立展示。** Skill/Expert 按所属市场来源的 owner 及既定 system/Space 受众形成独立条目，不沿用仅因 embedded 身份而设置的隐藏/private 标记；其独立可见已获产品确认，不另设逐项“是否允许独立展示”的批准步骤。仍需核验实际操作者、来源归属、计划范围及复用目标的受众覆盖和访问资格；Admin 身份不豁免跨 Space/private 依赖限制（同 owner private→private 允许，space/system 不得引用 private）。
 8. **第二次 preview（freeze）。** 以同一来源重取并重验完整映射、拓扑、标签、归属/受众和文件，输出冻结的完整可批准计划及 `plan_digest`；任何无法确认项仍为 discovery 且不可 apply。人工对冻结计划作书面批准并生成离线授权；修改映射、分组、范围、关系或标签必须再次 preview，不能手改摘要。
 9. **拓扑创建与复用。** 按 Skill/Connector → Expert → Team 执行；新建资产与 map 原子记录，对复用也记录经验证的固定映射。新 Skill/Expert 须 `is_embedded=false` 且接入已有可见 default 投放/合法分类，不仅插入独立行；复用目标也必须满足独立展示资格。目标 Skill/Expert 必须有真实 release；Connector 必须有 effective。**system 新目标由 Admin 直接生效（无 pending review）；Space/Tenant 新目标沿用原自动/人工审核策略**，依赖未批准时 run 为 `waiting_review`，不切来源；审核提交与对应恢复状态原子记录，不因重试重复建版本/审核。
-10. **冻结来源切换。** 预读图并按统一锁序重验，首次 CAS 原 current Version、edit_revision 和 `input_digest`；校验目标 release/effective、文件、范围及 wiring 后创建新引用式快照/refs（目标 ID，版本仅审计），同事务写来源审计、map 及 `source_commit_json`。恢复先识别自己的输出，不对它重复最初 CAS 或提审；后续 current 新草稿必须保留，原冻结审核正常批准可完成。若发生其他外部发布/拒绝/取消则核对实际版本证据并按契约阻断或完成，不盲目套旧计划、不重激活旧 published。
+10. **冻结来源切换。** 预读图并按统一锁序重验，首次 CAS 原 current Version、edit_revision 和 `input_digest`；校验目标 release/effective、文件、范围及 wiring 后创建新引用式快照/refs（目标 ID + 发布冻结 pin），同事务写来源审计、map 及 `source_commit_json`。恢复先识别自己的输出，不对它重复最初 CAS 或提审；后续 current 新草稿必须保留，原冻结审核正常批准可完成。若发生其他外部发布/拒绝/取消则核对实际版本证据并按契约阻断或完成，不盲目套旧计划、不重激活旧 published。
 11. **按原职责发布。** system 使用批准的 Admin 发布权限；private 由本人按既有流程发布；同 owner private→private 依赖可保留，但不得把 private 历史内嵌依赖自动提升成 system/Space 来源依赖；此类来源列出阻断及所缺原有授权，不能暗中缩小库存范围或报 completed。Space 生成冻结审核版本并按原策略自动批准或等待人工批准；任何待审内容都不能直接覆盖 published。来源最终发布切换受 CAS/审核保护，current 新编辑不得被批准回写覆盖。
 12. **幂等与恢复。** **不使用幂等键参数**；同一冻结计划按 `(source_scope,source_identity,plan_digest,root_node_key=root)` 关联原 run，并发 apply/恢复仲裁到同一 run；换摘要/范围/映射/来源身份即 `plan_stale`，不新建第二个 run。先查 receipt 和 map，再恢复未提交步骤，不能重建已提交目标；非终态 `waiting_review/blocked` 不能被一次 receipt 回放永久冻结为不可恢复，按 CLI 协议从同一 run 继续。审核等待恢复必须关联原冻结 version/review，重读审核结果、所有目标资格及 Connector 观察值；拒绝/取消不能记完成，不能自动重提审核绕过决定。completed 才回放终态结果，并保持原计划不可改输入/过期复用。
 13. **部分失败闭合。** 返回每个来源和节点已提交结果、等待项及失败 reason；目标已建但来源 CAS 失败时保留可追踪 map，不报整体 completed。等待审核为 `waiting_review`；已提交部分步骤后失败按契约返回 `blocked` 及安全 run/已提交 ID/reason，不自造成功输出。源被编辑后须重新 preview/批准计划，不能在旧批准下自动套用新编辑；新计划不自动复用旧目标/授权，需重新显式批准复用。
 14. **核对与保留。** verify 比较新图、完整文件摘要、成员角色/Leader/server key、发布证据及每个拆出 Skill/Expert 的独立列表资格，确认所有节点/来源切换及发布结果就绪才 `completed`。只回填可确定的历史 refs；原快照、embedded 记录、原文件保持证据，旧格式记录不可再分发。不调用旧 `RebuildGraph/DeleteGraph` 清理历史子树，不随新父资产删除独立目标。对象清理仅限本次确实新建且无任何资源 current/历史/审核/安装计划引用的对象。
+
+## 存量 pin 回填（P 新增，生产切换前）
+
+- 范围：现有已发布 Expert/Team 的已发布关系。迁移 CLI 增加一次显式回填模式（命令名实现时确认），复用 inventory/preview/apply 的冻结计划与离线授权，**不在服务启动、DDL 或普通读取时执行**。
+- 逐根冻结规则：已有合法 `target_version_id` 且该版本仍是 official release → 保留；无 pin/无效 → 冻结到迁移时目标当前正式发布版；找不到可冻结版本 → 该根 `blocked`，**不静默取 latest/旧版，也不跳过**。
+- 回填在离线授权/冻结计划下执行并产出 `plan_digest`；计划记录每个根的最终 pin、目标 plugin/version 与证据。同一计划重跑/恢复由既有 run 仲裁，不重复冻结。
+- 回填只写已发布快照的 pin 与 run/map 审计，不改变来源内容、审核历史或 published 指针；不回填历史非当前发布版本，不做读取时懒回填。
+- 回填后源资源不因回填自动重新审核；下一次用户重新发布时按 P 重新冻结全部关系（未给 pin 的刷新到当前，显式 pin 校验后保留）。system versioned/Space/Tenant Connector 的既有 blocked 状态保留到对应路径补齐，不因回填被误标完成。
+- 回填前旧已发布根若缺 pin，公共/A34/安装按 pin 不可用整体失败（`blocked`），不得回退 latest；回填完成并核验后才放行对应市场读取。
 
 ## 异常处置
 
@@ -82,13 +93,13 @@ B 模型下迁移产物是引用式资源：Expert→Skill、Team→Expert 存�
 - [ ] **无 A29/A30 HTTP**：不存在 legacy_import preview/apply 路由或 Admin 按钮；服务启动/DDL 不自动转换；无 HTTP 旁路可绕过离线授权。**旧 `plugin-backfill` 退役；`marketplace-stock-migration` 的旧 `--all-spaces --apply`/`--rollback`/`--g4...`/固定 pin 危险模式已删除/不可达，旧 DSN 权限已撤销，旧二进制不能写入。**
 - [ ] 同名不同内容不复用；同内容不同权限不越权；Expert 的关系差异不会被 `plugin_hash` 相同掩盖；MCP 从不自动映射。
 - [ ] 多 server 默认保持集合，批准拆分可验证完整覆盖；重复 server key、越过既定 system/Space 受众或操作者无权的公开均阻断；同 owner private→private 合法，space/system 引用 private 阻断。
-- [ ] 以旧 Expert 内嵌 Skill、旧 Team 内嵌 Expert 且该 Expert 再内嵌 Skill 为样本，迁移及现有发布/审核完成后，分别通过真实 A01 确认 Skill/Expert 为独立可见条目，检查对应 default 投放及发布资格；原 Expert/Team 引用正确目标 ID（版本仅审计），不残留 embedded/private 隐藏依赖。范围外用户不可见；待审核或不满足既有列表条件时不伪报迁移完成。Web/Buddy 真实列表展示由 REL-01 验证。
+- [ ] 以旧 Expert 内嵌 Skill、旧 Team 内嵌 Expert 且该 Expert 再内嵌 Skill 为样本，迁移及现有发布/审核完成后，分别通过真实 A01 确认 Skill/Expert 为独立可见条目，检查对应 default 投放及发布资格；原 Expert/Team 引用正确目标 ID 并在发布快照冻结 pin，不残留 embedded/private 隐藏依赖。范围外用户不可见；待审核或不满足既有列表条件时不伪报迁移完成。Web/Buddy 真实列表展示由 REL-01 验证。
 - [ ] 新 Connector（旧 inline MCP）system 走 Admin 直接生效且无 pending review；space/Tenant 走既有审核，人工模式 run 为 `waiting_review`，以 `effective_revision/digest` 观察值批准，不直接写 effective。
 - [ ] 新建目标与映射同事务；依赖未批准返回 `waiting_review`，批准后可恢复；拒绝、取消或 effective 变化不会误完成。
 - [ ] 冻结计划后编辑来源必被 CAS 拒绝；目标已建的来源失败不丢 map、不重复创建，也不被其他成功来源掩盖。
 - [ ] 同一冻结计划重跑/恢复返回同一 run、资源/版本；换计划/摘要即 `plan_stale`；逐个提交点中断后恢复不重复创建、不跳过校验。
 - [ ] 同一原计划并发 apply/恢复只仲裁出一个 run 与一套目标/映射；数据库来源身份非空；ZIP 来源仅在显式启用后验收（原字节 SHA-256 非空，不能利用 MySQL NULL 唯一约束缺口重复创建），**DB-only 交付不以 ZIP 通过为门槛**。
-- [ ] 两次 preview 均无写入；新建 Skill→新建 Expert→Team 从 map 精确绑定真实目标 ID/Version（版本仅审计），不要求操作者预测新 ID，无 latest 占位；迁移产物按 B 在后续读取/安装解析最新依赖。
+- [ ] 两次 preview 均无写入；新建 Skill→新建 Expert→Team 从 map 精确绑定真实目标 ID 并在发布/提交时冻结 pin，不要求操作者预测新 ID，无 latest 占位；迁移产物按 P 在后续读取/安装使用冻结 pin。
 - [ ] `waiting_review` 在同一 run 可在原审核批准后继续，重放不重复提交审核；拒绝/取消及旧冻结版与 current 分离均不误完成。并发恢复与中断恢复都不重复创建目标/版本/审核。
 - [ ] 已发布、未发布、待审核来源分开处理；没有证据的历史不补 latest/release；原快照、文件和 embedded 证据字节不变。
 - [ ] 缺文件、二进制、来源不明 Secret、硬编码目录均有阻断结果；清理失败上传不删除共享历史对象。
@@ -97,6 +108,8 @@ B 模型下迁移产物是引用式资源：Expert→Skill、Team→Expert 存�
 - [ ] 只有 DDL 授权或旧 backfill 命令权限时不能执行新生产转换；private/无发布证据/超批准范围来源逐项保留阻断，不提升受众、不漏报或当作未执行的新来源。
 - [ ] **数据安全回滚：** 演练只退兼容二进制、保留增量 schema/对象/attempt/map；不删表/不删文件/不覆盖旧快照；不把 `current_version_id/published_version_id` 改回旧值；内容恢复从旧历史生成新版本并走原发布/审核，不恢复 embedded/inline。**演练不得调用旧 `marketplace-stock-migration --rollback`，并断言该指针回滚、直接 `INSERT plugin_version_releases`、`--g4...` 自证批准、固定 pin 路径已不存在/不可达。**
 - [ ] 回滚后重新 inventory/核对 CAS 与批准范围，确认未决安装与对象完整性后再放行；不以重启、清缓存或恢复旧执行器代替修复。
+- [ ] **存量 pin 回填：** 已有合法 pin 且仍 official release 保留；缺失/无效冻结到迁移时目标当前正式发布版，并记录 `plan_digest`；无可冻结版本的根 `blocked` 且有可定位原因，不静默取 latest/旧版。回填只在离线授权/冻结计划下执行，普通读取/服务启动/DDL 不触发。
+- [ ] 回填后已发布快照的 pin 与 refs 一致、源内容/审核历史/published 指针不变；下一次用户重新发布按 P 重新冻结（缺失 pin 刷新到当前，显式 pin 校验后保留），未回填根在读取/A34/安装中按 pin 不可用失败而非 latest 回退。
 
 ## 静态源码依据与复用限制
 
@@ -111,7 +124,7 @@ B 模型下迁移产物是引用式资源：Expert→Skill、Team→Expert 存�
 
 - 转换器表驱动测试覆盖上述候选、授权、多 server、文件及异常矩阵；CLI 集成测试覆盖两次 preview 只读、冻结摘要、apply 幂等/CAS/离线授权和逐源结果，不用 mock 成功代替数据库恢复证据。另补 `plan_digest` 的 JCS/稳定排序测试向量（含 resources/relations 排序与 UTF-8 字节序），并断言 `source_digest=input_digest`。
 - 隔离 MySQL + OSS 演练：导入 system/Space/private 三类来源，逐步制造提交前/后中断、审核等待/拒绝、编辑竞态和部分失败，重跑后对比 receipt/map/版本/对象摘要及审计；另行演练数据安全回滚（兼容二进制、无指针回切、从历史 forward-fix）。
-- 交付批准计划样本、脱敏 inventory、映射与前后能力基线给 REL-01；样本包含共享依赖、Team 和多 server Connector，不运行真实安装来充当本 issue 前置。B 语义下同源两个 Expert 解析同一 Skill 最新版，不再构造“两个固定版本”样本。
+- 交付批准计划样本、脱敏 inventory、映射与前后能力基线给 REL-01；样本包含共享依赖、Team 和多 server Connector，不运行真实安装来充当本 issue 前置。P 语义下样本同时覆盖两个 Expert pin 同一 Skill 版本、以及 pin 不同版本，不再依赖 latest 解析。
 - 若 CLI schema/契约变更，更新对应文档与生成物并提供检查证据；具体实现阶段执行，本次文档编写不运行检查。
 
 ## 部署前置与退出
@@ -126,4 +139,4 @@ B 模型下迁移产物是引用式资源：Expert→Skill、Team→Expert 存�
 - [ ] 篡改计划/签名、错误主体/环境/范围、过期/撤销均非零退出且无新增业务写入；授权 ID 并发使用只关联同一原 run，不能新建第二个 run。
 - [ ] 过期后保留 run/map；续签同计划同批次授权恢复原 run 并记更替审计，不重复目标/版本/审核。换计划必须重新 preview/批准。轮换后旧钥按部署启停/撤销状态处理。
 - [ ] Admin 无资产审核步骤，system 迁移仍调用原直接发布领域事务；离线授权仅是迁移计划执行许可。Space 保留自动/人工策略。原 review 取消/拒绝后 run 保持 blocked，不自动换绑页面重提的新 review；需修订计划/授权处理。
-- [ ] #128 的锁前文件冻结、inline 负校验、过期回执说明保留；**readiness SQL 必须按 B 最新解析改写，或降级为仅结构检查并由 MP-04 承接，不得继续用 pinned `target_version_id` 遍历作为放行证据**；指针回滚/直接 release/`--g4...`/固定 pin 移除，旧 `marketplace-stock-migration --apply` 危险模式 fence；新增 run/batch/authorization 关联存储采用增量迁移，run 以 scope/identity/plan_digest/root_node_key 仲裁，不引入幂等键参数。
+- [ ] #128 的锁前文件冻结、inline 负校验、过期回执说明保留；**readiness SQL 必须按 P 改为校验已发布快照 pin 完整性，或降级为仅结构检查并由 MP-04 承接；不得把未回填/缺 pin 的旧快照当作放行证据，也不得懒解析 latest**；指针回滚/直接 release/`--g4...`/固定 pin 移除，旧 `marketplace-stock-migration --apply` 危险模式 fence；新增 run/batch/authorization 关联存储采用增量迁移，run 以 scope/identity/plan_digest/root_node_key 仲裁，不引入幂等键参数。

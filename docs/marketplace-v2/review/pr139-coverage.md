@@ -131,6 +131,8 @@ digest := sha256.Sum256([]byte(p.ManifestHash + "\x00" + p.PluginHash))
 
 ## 3. CI 结果
 
+详细根因见 [pr139-ci-failures.md](pr139-ci-failures.md)。
+
 `gh pr checks 139`：`verify` **FAIL**；`lint`/`secret-scan`/`dependency-review`/`code-review` 通过。失败测试：
 
 ```text
