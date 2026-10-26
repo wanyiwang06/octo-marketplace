@@ -14,12 +14,13 @@ A34 单请求完整内容读取仍为确认范围，按 B 返回“最新解析�
 1. [00 · 最终决策与规则裁定](00-decisions.md)：D1–D10、B 模型、C01–C08、A01–A09、迁移/审核/安装口径。
 2. [02 · 跨服务 API 契约](02-api-contracts.md)：A01/A34/A31/A32、DTO、错误、幂等与恢复（B 语义，wire 唯一权威）。
 3. [01 · 完整技术方案](01-technical-design.md)：领域、数据、状态、权限、读取、安装、迁移、回滚、验收（B 语义）。
-4. [开发 issues 与依赖图](issues/README.md)：4 个 Marketplace 主干、3 个客户端接入、1 个联合切换。
-5. [plan.json](plan.json)：8 个 issue 的硬依赖、仓库、API/表 owner。
+4. [开发规格与依赖图](issues/README.md)：1 个后端 tracking（#131）+ 详细规格；客户端/REL 已关闭或外部。
+5. [plan.json](plan.json)：唯一后端 issue、仓库、API/表 owner。
 6. [execution.md](execution.md)：当前 PR 拆分、远端 issue 映射、执行顺序。
 7. [decisions-20261026.md](decisions-20261026.md)：用户决策记录与 D4/D7/D8/D9 的通俗解释。
-8. [review/issue-review-131-138.md](review/issue-review-131-138.md)：GitHub #131–#138 的逐项评审与修正建议。
+8. [review/issue-review-131-138.md](review/issue-review-131-138.md)：历史 #131–#138 评审与修正建议。
 9. [review/blockers-explained.md](review/blockers-explained.md)：8 个关键阻塞 + 其他重要修正的案例解释。
+10. [review/pr139-coverage.md](review/pr139-coverage.md)：PR #139 对后端 issue 的覆盖与缺口。
 
 历史比对：[GitHub #114–#123 与固定 pin 方案的差异记录](03-github-issues-114-123-diff.md) 保留为历史；其中与 B 冲突的段落不再代表当前方案。
 
@@ -61,21 +62,22 @@ A34 单请求完整内容读取仍为确认范围，按 B 返回“最新解析�
 
 本轮已完成 00/01/02、issues、plan.json 的 B 模型对齐；编码前必须联读 [00](00-decisions.md) 与 [02](02-api-contracts.md)。本目录运行验证只覆盖文档链接/JSON 样例/依赖 DAG；服务、MySQL、Fleet、Daemon、客户端 smoke 是实现 issue 的验收要求，不冒充已通过。
 
-| Issue | B 模型下的直接编码依据 | 完成依赖 |
+| 规格/Issue | B 模型下的直接编码依据 | 状态 |
 |---|---|---|
-| [MP-01](issues/01-version-publication.md) | 版本/文件/current-published/release、CAS、读投影、A01 底座；无 A09 | 无 |
-| [MP-02](issues/02-dependency-governance.md) | 浮动引用/最新解析、A01 四字段诊断、删除并集、Connector effective、A25 receipts、A03/A10/A11 | MP-01 |
-| [MP-03](issues/03-installation-fleet.md) | A34、A31/A32 同一 Coordinator、同 key 原 plan、新 key 最新、状态机、无共存 | MP-02 |
-| [MP-04](issues/04-migration.md) | CLI 两次 preview/冻结计划、可恢复 apply、数据安全回滚、独立可见；无 A29/A30 HTTP | MP-02 |
-| [CL-01](issues/05-admin.md) | schema2 ZIP、A24 拒绝 Expert/Team、A25 Key/CAS/resolved、固定预览 | MP-02 |
-| [CL-02](issues/06-web-cli.md) | 显式引用/审核/版本读取/A34 一次完整内容/mine 四字段诊断/CAS/新 key 重装 | MP-02、MP-03 |
-| [CL-03](issues/07-buddy.md) | 单 A34、无依赖补取、本地边界、IPC 错误/pending | MP-03 |
-| [REL-01](issues/08-cutover.md) | 真实四端/数据层/Fleet/Daemon、部署门禁、旧执行器不可达、数据安全回滚 | MP-03、MP-04、CL-01、CL-02、CL-03 |
+| **[MP-BACKEND #131](issues/00-backend-delivery.md)** | **唯一后端 tracking：A 版本/CAS/effective、B refs/latest/A01/A15、C A34/安装、D 迁移 CLI** | **进行中；PR139 为初始实现，未完成** |
+| [MP-01](issues/01-version-publication.md) | 版本/文件/current-published/release、CAS、读投影、A01 底座；无 A09 | 详细规格 |
+| [MP-02](issues/02-dependency-governance.md) | 浮动引用/最新解析、A01 四字段诊断、删除并集、Connector effective、A25 receipts、A03/A10/A11 | 详细规格 |
+| [MP-03](issues/03-installation-fleet.md) | A34、A31/A32 同一 Coordinator、同 key 原 plan、新 key 最新、状态机、无共存 | 详细规格 |
+| [MP-04](issues/04-migration.md) | CLI 两次 preview/冻结计划、可恢复 apply、数据安全回滚、独立可见；无 A29/A30 HTTP | 详细规格 |
+| [CL-01](issues/05-admin.md) | schema2 ZIP、A24 拒绝 Expert/Team、A25 Key/CAS/resolved、固定预览 | #135 已关闭（admin） |
+| [CL-02](issues/06-web-cli.md) | 显式引用/审核/版本读取/A34 一次完整内容/mine 四字段诊断/CAS/新 key 重装 | #136 已关闭（web/cli） |
+| [CL-03](issues/07-buddy.md) | 单 A34、无依赖补取、本地边界、IPC 错误/pending | #137 已关闭（buddy） |
+| [REL-01](issues/08-cutover.md) | 真实四端/数据层/Fleet/Daemon、部署门禁、旧执行器不可达、数据安全回滚 | #138 已关闭（跨仓 REL） |
 
 编码时发现真实协议差异，先改 00/02，再改代码；禁止客户端猜字段或运行时降级。OpenAPI 生成及服务/页面/数据库 smoke 仍在各 issue 实现阶段执行，本轮只验证文档与契约样例。
 
 ## 五组评审修订状态
 
-决策、API、技术方案、8 个任务及 plan.json 已同步本轮修订，状态为“文档修订完成，待开发与实现验收”。Admin 不用审核；通知仅审计展示；人工审核观察冲突走取消后新一轮提交；安装原 key 不因上游正常更新而改变；删除不扩大到历史关系超集。离线迁移授权以 02 §5.1 为准。
+决策、API、技术方案、唯一后端 tracking #131 及 plan.json 已同步本轮修订，状态为“文档修订完成，待开发与实现验收”。Admin 不用审核；通知仅审计展示；人工审核观察冲突走取消后新一轮提交；安装原 key 不因上游正常更新而改变；删除不扩大到历史关系超集。离线迁移授权以 02 §5.1 为准。
 
-PR 基线是 2026-10-26 已核验快照，不代表实时状态；实施前重新核对 head。#128 为 #126 替代候选，复用其中安全修复，不能把两份实现重复合入；具体增量按 issues/README.md 分配。
+PR 基线为 `origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）。PR #139 是 draft 初始后端实现，未完成 #131；实施前重新核对 head，不把 PR139 当前状态当作验收通过。

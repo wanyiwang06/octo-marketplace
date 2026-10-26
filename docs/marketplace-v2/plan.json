@@ -1,6 +1,6 @@
 {
   "schema_version": "1.1",
-  "status": "documentation_revised_pending_implementation",
+  "status": "consolidated_backend_pending_implementation",
   "contract": "02-api-contracts.md",
   "decisions": {
     "decided_at": "2026-10-26",
@@ -88,243 +88,56 @@
   ],
   "issues": [
     {
-      "id": "MP-01",
-      "title": "不可变版本、发布、Connector effective 与统一读取",
-      "path": "issues/01-version-publication.md",
-      "description": "B 模型版本底座：current/published/release、不可变文件、Connector effective（含存量回填/effective_digest）、edit_revision CAS 与 A12 完整 Write 的 relations 必填、published/editing/effective 读投影、refs 可空仅审计与 CHECK/validator 放宽；提供 A01 四字段 DTO 类型/序列化槽位但不计算/不保证 mine 必返（MP-02）；无 A09 restore、无 restored_from_version_id。",
-      "depends_on": [],
+      "id": "MP-BACKEND",
+      "title": "Marketplace v2 后端交付（合并 MP-01–MP-04）",
       "repositories": [
         "octo-marketplace"
       ],
+      "path": "issues/00-backend-delivery.md",
+      "issue_url": "https://github.com/Mininglamp-OSS/octo-marketplace/issues/131",
+      "depends_on": [],
       "owns_api_ids": [
         "A01",
         "A02",
+        "A03",
         "A04",
         "A05",
         "A06",
         "A07",
         "A08",
-        "A12",
-        "A13",
-        "A21",
-        "A22",
-        "A23",
-        "A24",
-        "A26"
-      ],
-      "owns_new_tables": [
-        "plugin_version_releases",
-        "plugin_connector_effective"
-      ],
-      "issue_url": "https://github.com/Mininglamp-OSS/octo-marketplace/issues/131"
-    },
-    {
-      "id": "MP-02",
-      "title": "浮动引用、最新解析、审核观察与依赖治理",
-      "path": "issues/02-dependency-governance.md",
-      "description": "唯一 LatestPublishedResolver：输入 {root_plugin_id, root: published|explicit version_id|editing}，A01/A34 用 published、A03 显式历史根、A13/A14 用提交 version，永不回读显式根 current；Expert→Skill、Team→Expert 解析最新正式发布版（Team 仅一跳成员 Expert 再读其 current published refs），Connector 读 effective，一次请求一个一致性快照；A01/A03/A34/安装/审核共用；A01 四字段 mine 必返、SQL COUNT/facets 与 resolver 同一语义核心；删除保护并集并移除 rejectPublishedMutation 总禁令；private/space/system 矩阵；A15 resolved_dependency_observations 与 connector_observations；refs/CHECK 增量；A25 receipts。",
-      "depends_on": [
-        "MP-01"
-      ],
-      "repositories": [
-        "octo-marketplace"
-      ],
-      "owns_api_ids": [
-        "A03",
         "A10",
         "A11",
+        "A12",
+        "A13",
         "A14",
         "A15",
         "A16",
         "A17",
         "A18",
         "A19",
-        "A25",
-        "A27"
-      ],
-      "extends_api_ids": [
-        "A01",
-        "A12",
-        "A13",
-        "A24",
-        "A34"
-      ],
-      "owns_new_tables": [
-        "plugin_relations",
-        "plugin_version_relation_refs",
-        "plugin_mutation_receipts"
-      ],
-      "issue_url": "https://github.com/Mininglamp-OSS/octo-marketplace/issues/132"
-    },
-    {
-      "id": "MP-03",
-      "title": "统一原子安装、A34 完整最新内容与安全重试",
-      "path": "issues/03-installation-fleet.md",
-      "description": "A34 单 GET 按 B 返回最新完整图与全部原始文件（bundle_digest 动态、no-store、零 Fleet/零写入）；A31/A32 共用唯一 InstallCoordinator，同 key 只重放首次冻结 plan（intent_digest 仅 root/Space/Workspace/runtime/resource_name，custom_env 仅完整 input_hmac），显式安装输入变化 409；上游正常发新版仍重放原 plan，新 key 才解析最新，状态机含 EXPIRED/UNKNOWN/租约、fleet_key=attempt_id、仅首次成功计数；移除 #128 的 pinned/mk1/adapter_version/transform_variant，flag on/off 只控制 Coordinator；attempt PK 去 space_id 与旧行迁移；同名冲突失败（same_install_identity_different_content），不改名/不改 frontmatter。",
-      "depends_on": [
-        "MP-02"
-      ],
-      "repositories": [
-        "octo-marketplace"
-      ],
-      "integration_dependencies": [
-        "octo-fleet"
-      ],
-      "owns_api_ids": [
-        "A31",
-        "A32",
-        "A34"
-      ],
-      "consumes_api_ids": [
-        "F01"
-      ],
-      "owns_new_tables": [
-        "plugin_install_attempts"
-      ],
-      "issue_url": "https://github.com/Mininglamp-OSS/octo-marketplace/issues/133"
-    },
-    {
-      "id": "MP-04",
-      "title": "CLI 冻结计划驱动的历史资产转换与数据安全回滚",
-      "path": "issues/04-migration.md",
-      "description": "CLI + 离线授权完成生产迁移：在现有 marketplace-stock-migration、internal/backfill/stockmigration 与 plugin_stock_migration_batches/roots 上演进，删除 --rollback 指针回滚/直接 release/--g4 自证批准/固定 pin，撤销旧 DSN 权限并移除/deny 旧构建使旧 --apply 不可写（旧 plugin-backfill 退役）；两次只读 preview、显式标签/映射并冻结 plan_digest、apply 只认冻结计划；run 由 scope/identity/plan_digest/root_node_key 仲裁（无幂等键），定义 frozen plan/run/batch/authorization 增量存储；plan_stale/authorization_invalid 非零退出/blocked，不用 409；create/reuse/update_source、Connector server 分组、waiting_review、reuse 漂移 plan_stale；数据安全回滚（不恢复指针、不删历史）；不新增 A29/A30 HTTP；域内验收不依赖 MP-03 安装/A34，ZIP 来源条件验收。",
-      "depends_on": [
-        "MP-02"
-      ],
-      "repositories": [
-        "octo-marketplace"
-      ],
-      "owns_api_ids": [],
-      "extends_tables": [
-        "plugin_mutation_receipts",
-        "plugin_stock_migration_batches",
-        "plugin_stock_migration_roots"
-      ],
-      "owns_new_tables": [
-        "plugin_dependency_migration_map",
-        "plugin_dependency_migration_runs",
-        "plugin_migration_authorizations"
-      ],
-      "issue_url": "https://github.com/Mininglamp-OSS/octo-marketplace/issues/134"
-    },
-    {
-      "id": "CL-01",
-      "title": "Admin 引用式容器（ZIP-only）、CAS 与只读依赖预览",
-      "path": "issues/05-admin.md",
-      "description": "Expert/Team 仅 schema2 ZIP（A25 强制 Idempotency-Key/CAS/resolved[]），A24 拒绝 JSON 内容写；预览展示本次解析到的目标版本（非权威 pin）；MCP/独立 Skill 写同步 CAS；Admin 不用审核，沿用直接生效与上下架动作。",
-      "depends_on": [
-        "MP-02"
-      ],
-      "repositories": [
-        "octo-admin"
-      ],
-      "owns_api_ids": [],
-      "consumes_api_ids": [
-        "A03",
-        "A10",
         "A21",
         "A22",
         "A23",
         "A24",
         "A25",
         "A26",
-        "A27"
-      ],
-      "owns_new_tables": [],
-      "issue_url": "https://github.com/Mininglamp-OSS/octo-marketplace/issues/135"
-    },
-    {
-      "id": "CL-02",
-      "title": "Web/CLI 发布审核、A34 最新内容、mine 诊断与新 key 重装",
-      "path": "issues/06-web-cli.md",
-      "description": "Web/CLI 显式 relations + CAS 保存发布；一次 A34 取最新完整内容（不按依赖扇出、不补 frontmatter）；mine 全部/专家/专家团透传四字段诊断、匿名原因与 Tooltip；安装同 key 原 plan、配置变化提示新 key 新安装。",
-      "depends_on": [
-        "MP-02",
-        "MP-03"
-      ],
-      "coding_can_start_after": [
-        "MP-02"
-      ],
-      "repositories": [
-        "octo-web",
-        "octo-cli"
-      ],
-      "owns_api_ids": [],
-      "consumes_api_ids": [
-        "A01",
-        "A02",
-        "A03",
-        "A04",
-        "A05",
-        "A06",
-        "A07",
-        "A08",
-        "A10",
-        "A12",
-        "A13",
-        "A14",
-        "A15",
-        "A16",
-        "A17",
-        "A18",
-        "A19",
+        "A27",
+        "A31",
         "A32",
         "A34"
       ],
-      "owns_new_tables": [],
-      "issue_url": "https://github.com/Mininglamp-OSS/octo-marketplace/issues/136"
-    },
-    {
-      "id": "CL-03",
-      "title": "Buddy 单 A34 最新内容、本地安装与安全重试",
-      "path": "issues/07-buddy.md",
-      "description": "Buddy 只消费一次 A34 的最新完整图/原始文件，删除依赖 BFS 与 ZIP/frontmatter 字节改写；工作空间招募同 key 原 plan 重试，pending 仅无 Secret 防重复/人工核对；不改 Fleet/Daemon。",
-      "depends_on": [
-        "MP-03"
+      "owns_new_tables": [
+        "plugin_version_releases",
+        "plugin_connector_effective",
+        "plugin_relations",
+        "plugin_version_relation_refs",
+        "plugin_mutation_receipts",
+        "plugin_install_attempts",
+        "plugin_dependency_migration_map",
+        "plugin_dependency_migration_runs",
+        "plugin_migration_authorizations"
       ],
-      "repositories": [
-        "octo-buddy-client"
-      ],
-      "owns_api_ids": [],
-      "consumes_api_ids": [
-        "A01",
-        "A02",
-        "A03",
-        "A05",
-        "A06",
-        "A07",
-        "A08",
-        "A31",
-        "A34"
-      ],
-      "owns_new_tables": [],
-      "issue_url": "https://github.com/Mininglamp-OSS/octo-marketplace/issues/137"
-    },
-    {
-      "id": "REL-01",
-      "title": "四端真实证据、部署门禁、旧执行器退役与数据安全回滚",
-      "path": "issues/08-cutover.md",
-      "description": "真实 MySQL/OSS/Fleet/Daemon 与 Admin/Web/CLI/Buddy 四端证据；部署层全入口门禁使旧市场执行器不可达；旧写入/A32 legacy 补偿退役；回滚只退兼容二进制并从历史生成新版本，不恢复指针；不把同名共存列为门槛。",
-      "depends_on": [
-        "MP-03",
-        "MP-04",
-        "CL-01",
-        "CL-02",
-        "CL-03"
-      ],
-      "repositories": [
-        "octo-marketplace",
-        "octo-admin",
-        "octo-web",
-        "octo-cli",
-        "octo-buddy-client"
-      ],
-      "integration_dependencies": [
-        "octo-fleet"
-      ],
-      "owns_api_ids": [],
-      "owns_new_tables": [],
-      "issue_url": "https://github.com/Mininglamp-OSS/octo-marketplace/issues/138"
+      "description": "唯一 octo-marketplace 后端 tracking issue。A：版本/CAS/effective/读投影；B：refs/latest/A01/A15/删除治理；C：A34/统一安装；D：MP-04 CLI 迁移/离线授权/数据安全回滚。PR139 为 draft 初始实现，已知缺口见 issues/00-backend-delivery.md §2；客户端 #135–#137 与跨仓 REL #138 已关闭，不在本 issue。"
     }
   ],
   "api_catalog_ids": [
@@ -358,7 +171,7 @@
     "A34",
     "F01"
   ],
-  "cutover_issue": "REL-01",
+  "cutover_issue": "MP-BACKEND",
   "runtime_fallbacks_allowed": false,
   "latest_version_fallback_allowed": false,
   "review_revision": "2026-10-26-five-groups",
@@ -379,5 +192,14 @@
     ],
     "note": "本轮重新查询 GitHub/fetch；PR127 尚未合入，不作为已交付能力。"
   },
-  "table_ownership_note": "保留 schema 1.1 的 owns_new_tables 字段名以兼容消费者；它列出本方案表职责，不表示基线已有表需要重建。按实际合并状态复用并提交增量 DDL。"
+  "table_ownership_note": "保留 schema 1.1 的 owns_new_tables 字段名以兼容消费者；它列出本方案表职责，不表示基线已有表需要重建。按实际合并状态复用并提交增量 DDL。",
+  "superseded_issues": {
+    "132": "merged_into_131_MP-02",
+    "133": "merged_into_131_MP-03",
+    "134": "merged_into_131_MP-04",
+    "135": "closed_external_octo-admin",
+    "136": "closed_external_octo-web_octo-cli",
+    "137": "closed_external_octo-buddy-client",
+    "138": "closed_cross_repo_REL"
+  }
 }

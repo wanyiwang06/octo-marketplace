@@ -1,14 +1,14 @@
-# 开发 issues 与依赖关系（B 模型）
+# 开发规格与依赖关系（B 模型）
 
-> **执行基线更新（2026-10-26）：** 已重新查询 GitHub 并 fetch：当前 main 为 `eec5223`，已合入 #124/#125/#128；#126 已关闭，#127 仍开放。下文旧状态表保留核验历史，不作为本轮施工基线。后续工作从已合并代码增量改造，既有版本/release/refs/attempt/migration 代码复用；任务及 PR 追踪见 execution.md。
+> **2026-10-26 整合：** GitHub 只保留 [#131](https://github.com/Mininglamp-OSS/octo-marketplace/issues/131) 作为 **octo-marketplace 唯一后端 tracking issue**；原 #132–#134 合并进 #131，#135–#137 因实现仓库是 octo-admin/web/cli/buddy 已关闭，#138 因跨仓 REL 已关闭。本文的 01–08 保留为详细规格，不再是独立 GitHub issue；执行以 [00-backend-delivery.md](00-backend-delivery.md) 和 #131 为准。
 
-这些是可直接复制到 issue tracker 的本地开发说明，不是已创建的远程 issue，也不是强制“一 issue 一 PR”。8 个 issue 按可独立验收的能力和仓库边界组织；Marketplace 主干只有 4 个，不再沿原 14 个 PR 编号逐项执行。
+> **执行基线：** `origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）；PR #139 是 draft 初始实现，未完成 #131 验收。
 
 **状态（2026-10-26）：决策已锁定，按 B 模型执行。** Expert→Skill、Team→Expert 在每次读取/安装时解析目标当前正式发布版，`target_version_id` 只作上次解析/审计值；Connector 按 ID 读 effective；A01/A03/A34/安装/审核共用一个最新解析服务，每次请求各自使用一致性快照；最新版不可用时不回退旧版。A09 restore、A29/A30 HTTP 迁移、同名/多版本共存、“曾发布即禁止删除”均已明确不做。完整口径见 [00-decisions](../00-decisions.md) 与 [2026-10-26 决策记录](../decisions-20261026.md)；本文只负责执行切片，接口语义以 [API 契约](../02-api-contracts.md) 为准，文档冲突先改 00/02 再改代码。
 
 ## 0. 当前代码基线与 PR 映射
 
-当前基线为 `origin/main 59ca051`（#124/#125 已合入）；核验快照中的 #126/#127/#128 均为开放 PR，#128 是 #126 替代候选，**不能按现状合并**，需先按本目录的 B/D 口径改造。
+当前基线为 `origin/main eec5223`（#124/#125/#128 已合入；#126 关闭；#127 开放）。PR #139（draft，head `0c7cc1f`）已提供 CAS/effective/A34/latest graph/冻结安装等基础，但未完成 #131 的 A–D 工作流；本地 checkout 落后时先 fetch。
 
 | PR | 状态 | 实际交付 | 与本方案的差距 / 处理 |
 |---|---|---|---|
@@ -24,16 +24,17 @@
 
 硬依赖表示该 issue 完成验收所需前置能力；可以提前按确定契约编码，不代表前置未完成时可以启用。唯一机器可读来源为 [plan.json](../plan.json)；接口语义以 [API 契约](../02-api-contracts.md) 为准。
 
-| Issue | 可执行说明 | 完成硬依赖 | 主要仓库 | 完成交付 |
+| 规格编号 | 详细说明 | 完成硬依赖 | 主要仓库 | 状态/交付 |
 |---|---|---|---|---|
-| MP-01 | [版本、发布与统一读取](01-version-publication.md) | 无 | marketplace | 不可变文件/current-published/release/Connector effective/CAS 与 relations/读投影/A01 四字段 DTO 底座；无 A09 |
-| MP-02 | [浮动引用、最新解析与审核治理](02-dependency-governance.md) | MP-01 | marketplace | 唯一最新解析服务/引用写入与矩阵/审核观察/live∪published∪Team→最新发布 Expert 间接保护/容器/候选与影响；A01 公共 SQL 过滤、COUNT/facets、mine 四字段安全诊断 |
-| MP-03 | [原子安装、A34 与安全重试](03-installation-fleet.md) | MP-02 | marketplace（联调依赖现有 Fleet） | A31/A32/A34 唯一端点 owner；A34 单 GET 最新完整内容/一个安装引擎/同 key 原 plan/新 key 最新/状态机与 UNKNOWN；同名冲突失败 |
-| MP-04 | [CLI 转换与数据安全回滚](04-migration.md) | MP-02 | marketplace | CLI 两次 preview/冻结 `plan_digest`/apply 只认冻结计划/映射/waiting_review/数据安全回滚；不调用 Fleet |
-| CL-01 | [Admin 接入](05-admin.md) | MP-02 | admin（外部依赖） | schema2 ZIP-only/A25 Key+CAS+`resolved[]`/A03/A10 最新解析 + A22 精确读取/effective 读取；**Admin 无资产审核，create/update/reupload 直接生效；仅 Tenant 审核**；readiness SQL 按 B 改写或仅结构检查 |
-| CL-02 | [Web 与 CLI 接入](06-web-cli.md) | MP-02、MP-03 | web、cli | 显式引用+CAS/审核/版本读取/A34 一次最新完整内容/CLI 查询/mine 四字段标记与匿名 Tooltip/同 key 原 plan、新 key 新安装 |
-| CL-03 | [Buddy 接入](07-buddy.md) | MP-03 | buddy-client | 单 A34 最新完整内容、无依赖补取、无 BFS/无字节改写/本地读取边界/工作空间招募与安全重试 |
-| REL-01 | [四端证据与干净切换](08-cutover.md) | MP-03、MP-04、CL-01、CL-02、CL-03 | 全部涉及仓库 | 真实数据层/四端/Fleet/Daemon 证据；部署门禁使旧执行器不可达；数据安全回滚；B/A01/D4 真实证据 |
+| **MP-BACKEND** | **[合并后端交付](00-backend-delivery.md)** | 无 | **octo-marketplace** | **唯一 GitHub tracking（#131）；A–D 工作流，PR139 为初始实现** |
+| MP-01 | [版本、发布与统一读取](01-version-publication.md) | MP-BACKEND | marketplace | 详细规格； 不可变文件/current-published/release/Connector effective/CAS 与 relations/读投影/A01 四字段 DTO 底座；无 A09 |
+| MP-02 | [浮动引用、最新解析与审核治理](02-dependency-governance.md) | MP-BACKEND | marketplace | 详细规格； 唯一最新解析服务/引用写入与矩阵/审核观察/live∪published∪Team→最新发布 Expert 间接保护/容器/候选与影响；A01 公共 SQL 过滤、COUNT/facets、mine 四字段安全诊断 |
+| MP-03 | [原子安装、A34 与安全重试](03-installation-fleet.md) | MP-BACKEND | marketplace（联调依赖现有 Fleet） | 详细规格； A31/A32/A34 唯一端点 owner；A34 单 GET 最新完整内容/一个安装引擎/同 key 原 plan/新 key 最新/状态机与 UNKNOWN；同名冲突失败 |
+| MP-04 | [CLI 转换与数据安全回滚](04-migration.md) | MP-BACKEND | marketplace | 详细规格； CLI 两次 preview/冻结 `plan_digest`/apply 只认冻结计划/映射/waiting_review/数据安全回滚；不调用 Fleet |
+| CL-01 | [Admin 接入](05-admin.md) | — | admin（外部依赖） | **GitHub #135 已关闭（非本仓库）**； schema2 ZIP-only/A25 Key+CAS+`resolved[]`/A03/A10 最新解析 + A22 精确读取/effective 读取；**Admin 无资产审核，create/update/reupload 直接生效；仅 Tenant 审核**；readiness SQL 按 B 改写或仅结构检查 |
+| CL-02 | [Web 与 CLI 接入](06-web-cli.md) | — | web、cli | **GitHub #136 已关闭（非本仓库）**； 显式引用+CAS/审核/版本读取/A34 一次最新完整内容/CLI 查询/mine 四字段标记与匿名 Tooltip/同 key 原 plan、新 key 新安装 |
+| CL-03 | [Buddy 接入](07-buddy.md) | — | buddy-client | **GitHub #137 已关闭（非本仓库）**； 单 A34 最新完整内容、无依赖补取、无 BFS/无字节改写/本地读取边界/工作空间招募与安全重试 |
+| REL-01 | [四端证据与干净切换](08-cutover.md) | — | 全部涉及仓库 | **GitHub #138 已关闭（跨仓 REL）**； 真实数据层/四端/Fleet/Daemon 证据；部署门禁使旧执行器不可达；数据安全回滚；B/A01/D4 真实证据 |
 
 ```mermaid
 flowchart LR

@@ -2,7 +2,7 @@
 
 > **执行基线更新（2026-10-26）：** 已重新查询 GitHub 并 fetch：当前 main 为 `eec5223`，已合入 #124/#125/#128；#126 已关闭，#127 仍开放。下文旧状态表保留核验历史，不作为本轮施工基线。后续工作从已合并代码增量改造，既有版本/release/refs/attempt/migration 代码复用；任务及 PR 追踪见 execution.md。
 
-**状态：五组评审意见已修订，待开发与实现验收。** 本目录已同步决策、wire、内部实现和 8 个开发 issue；文档闭合不代表源码已实现或运行验收通过。
+**状态：五组评审意见已修订，待开发与实现验收。** 本目录已同步决策、wire、内部实现，并把 GitHub 收敛为 #131 一个后端 tracking issue（详细规格仍保留 8 份）；文档闭合不代表源码已实现或运行验收通过。
 
 ## 0. 评审目标
 
@@ -20,7 +20,7 @@
 | 2 | [00-decisions.md](00-decisions.md) | B 模型、D1–D10、C01–C08、A01–A09、迁移/审核/安装口径 |
 | 3 | [02-api-contracts.md](02-api-contracts.md) | wire 唯一权威：A01/A34/A31/A32/A03/A10/A11、DTO、错误、幂等 |
 | 4 | [01-technical-design.md](01-technical-design.md) | 内部模型、事务、最新解析、锁、审核、安装、迁移 |
-| 5 | [issues/README.md](issues/README.md) + 8 个 issue | 交付切片、依赖、验收、PR 映射 |
+| 5 | [issues/README.md](issues/README.md) + [00-backend-delivery](issues/00-backend-delivery.md) | 唯一后端 tracking、A–D 工作流、详细规格 |
 | 6 | [plan.json](plan.json) | 机器可读依赖/所有权/API 映射 |
 | 7 | [execution.md](execution.md) | 当前 PR 拆分、远端 issue 映射、执行顺序 |
 | 8 | [decisions-20261026.md](decisions-20261026.md) | 用户决策记录与理由（含 D4/D7/D8/D9 解释） |
@@ -145,4 +145,4 @@
 - 优先指到文件 + 章节，例如“02 §2.2.1 / A01 的 evaluated_view 语义”。
 - 区分三类：**阻塞**（会改变授权/数据/安装结果）、**实现细节**（编码时确认）、**文案**。
 - 若发现 00/01/02 冲突，先改 00（唯一决策源），再改 02（wire），最后改 01/issues；不要在代码里自行降级。
-- 评审通过后，建议按 `README.md` 的 issue 顺序拆代码任务，先完成 MP-01 版本/effective/CAS 底座，再完成 MP-02 共享解析与依赖治理；随后 MP-03 实现安装/A34，MP-04 与 CL-01 可并行。
+- 评审通过后，按 #131 的 A→B→C/D 工作流拆代码任务：先完成版本/effective/CAS，再完成 refs/latest/A01，随后 A34/安装与迁移 CLI 并行；客户端 #135–#137 与跨仓 REL #138 已关闭，不在本仓库。
